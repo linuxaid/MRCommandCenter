@@ -1,0 +1,125 @@
+[
+  {
+    "id": "6a9c1750b37d513a43987b574953fceb50b03ce7",
+    "individual_note": false,
+    "notes": [
+      {
+        "id": 1126,
+        "type": "DiffNote",
+        "body": "should this retry forever?",
+        "author": {
+          "id": 31,
+          "username": "dana",
+          "name": "Dana Okafor"
+        },
+        "system": false,
+        "resolvable": true,
+        "resolved": false,
+        "created_at": "2026-09-30T10:15:00.000Z",
+        "position": {
+          "base_sha": "1111111111111111111111111111111111111111",
+          "start_sha": "2222222222222222222222222222222222222222",
+          "head_sha": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+          "old_path": "app/webhooks/delivery.py",
+          "new_path": "app/webhooks/delivery.py",
+          "position_type": "text",
+          "old_line": null,
+          "new_line": 42,
+          "line_range": {
+            "start": {
+              "line_code": "abc_0_42",
+              "type": "new",
+              "old_line": null,
+              "new_line": 42
+            },
+            "end": {
+              "line_code": "abc_0_42",
+              "type": "new",
+              "old_line": null,
+              "new_line": 42
+            }
+          }
+        }
+      },
+      {
+        "id": 1127,
+        "type": "DiffNote",
+        "body": "no, capped at 5",
+        "author": {
+          "id": 17,
+          "username": "priya",
+          "name": "Priya Natarajan"
+        },
+        "system": false,
+        "resolvable": true,
+        "resolved": false,
+        "position": {
+          "base_sha": "1111111111111111111111111111111111111111",
+          "start_sha": "2222222222222222222222222222222222222222",
+          "head_sha": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+          "old_path": "app/webhooks/delivery.py",
+          "new_path": "app/webhooks/delivery.py",
+          "position_type": "text",
+          "old_line": null,
+          "new_line": 42,
+          "line_range": {
+            "start": {
+              "line_code": "abc_0_42",
+              "type": "new",
+              "old_line": null,
+              "new_line": 42
+            },
+            "end": {
+              "line_code": "abc_0_42",
+              "type": "new",
+              "old_line": null,
+              "new_line": 42
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "87805b7c09016a7058e91bdbe7b29d1f284a39e6",
+    "individual_note": false,
+    "notes": [
+      {
+        "id": 1128,
+        "type": "DiffNote",
+        "body": "typo",
+        "author": {
+          "id": 31,
+          "username": "dana",
+          "name": "Dana Okafor"
+        },
+        "system": false,
+        "resolvable": true,
+        "resolved": true,
+        "resolved_by": {
+          "id": 17,
+          "username": "priya",
+          "name": "Priya Natarajan"
+        }
+      }
+    ]
+  },
+  {
+    "id": "fa9a5bfde2d4b0f3b3fe7b4f0f8f86e6a33b9d1c",
+    "individual_note": true,
+    "notes": [
+      {
+        "id": 1129,
+        "type": null,
+        "body": "approved this merge request",
+        "author": {
+          "id": 31,
+          "username": "dana",
+          "name": "Dana Okafor"
+        },
+        "system": true,
+        "resolvable": false
+      }
+    ]
+  }
+]

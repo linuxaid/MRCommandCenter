@@ -1,0 +1,37 @@
+{
+  "expand": "renderedFields,names,schema",
+  "id": "10042",
+  "self": "https://acme.atlassian.net/rest/api/3/issue/10042",
+  "key": "PAY-142",
+  "fields": {
+    "summary": "Retry failed webhook deliveries",
+    "status": { "self": "https://acme.atlassian.net/rest/api/3/status/10001", "name": "In Review", "id": "10001",
+                "statusCategory": { "id": 4, "key": "indeterminate", "colorName": "yellow", "name": "In Progress" } },
+    "issuetype": { "id": "10001", "name": "Story", "subtask": false },
+    "assignee": { "accountId": "5b10a", "displayName": "Priya Natarajan", "active": true },
+    "priority": { "id": "2", "name": "High", "iconUrl": "https://acme.atlassian.net/images/icons/priorities/high.svg" },
+    "fixVersions": [ { "id": "10100", "name": "2.4.0", "released": false } ],
+    "description": {
+      "type": "doc", "version": 1,
+      "content": [
+        { "type": "paragraph", "content": [ { "type": "text", "text": "Merchants miss webhooks during " }, { "type": "text", "text": "short", "marks": [ { "type": "strong" } ] }, { "type": "text", "text": " outages." } ] },
+        { "type": "heading", "attrs": { "level": 3 }, "content": [ { "type": "text", "text": "Acceptance Criteria" } ] },
+        { "type": "bulletList", "content": [
+          { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "Retries 5xx up to 5 times" } ] } ] },
+          { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "Honors " }, { "type": "text", "text": "Retry-After", "marks": [ { "type": "code" } ] } ] } ] }
+        ] },
+        { "type": "heading", "attrs": { "level": 3 }, "content": [ { "type": "text", "text": "Out of scope" } ] },
+        { "type": "paragraph", "content": [ { "type": "text", "text": "Dead-letter queue." } ] }
+      ]
+    },
+    "customfield_10050": {
+      "type": "doc", "version": 1,
+      "content": [
+        { "type": "taskList", "attrs": { "localId": "a" }, "content": [
+          { "type": "taskItem", "attrs": { "localId": "b", "state": "DONE" }, "content": [ { "type": "text", "text": "Retries 5xx with backoff" } ] },
+          { "type": "taskItem", "attrs": { "localId": "c", "state": "TODO" }, "content": [ { "type": "text", "text": "429 honors Retry-After" } ] }
+        ] }
+      ]
+    }
+  }
+}

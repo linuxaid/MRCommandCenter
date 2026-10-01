@@ -1,0 +1,26 @@
+{
+  "id": 84012,
+  "iid": 412,
+  "project_id": 101,
+  "title": "Retry failed webhook deliveries with exponential backoff",
+  "state": "opened",
+  "created_at": "2026-09-28T09:12:44.512Z",
+  "updated_at": "2026-09-30T16:03:10.871Z",
+  "merge_status": "can_be_merged",
+  "approved": false,
+  "approvals_required": 2,
+  "approvals_left": 1,
+  "require_password_to_approve": false,
+  "approved_by": [
+    { "user": { "id": 31, "username": "dana", "name": "Dana Okafor", "state": "active" } }
+  ],
+  "suggested_approvers": [],
+  "approvers": [],
+  "approver_groups": [],
+  "user_has_approved": false,
+  "user_can_approve": true,
+  "approval_rules_left": [],
+  "has_approval_rules": true,
+  "merge_request_approvers_available": true,
+  "multiple_approval_rules_available": true
+}

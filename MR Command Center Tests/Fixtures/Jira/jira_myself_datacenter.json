@@ -1,0 +1,9 @@
+{
+  "self": "https://jira.example.com/rest/api/2/user?username=jdoe",
+  "key": "JIRAUSER10100",
+  "name": "jdoe",
+  "emailAddress": "jane@example.com",
+  "displayName": "Jane Doe",
+  "active": true,
+  "timeZone": "Europe/Berlin"
+}

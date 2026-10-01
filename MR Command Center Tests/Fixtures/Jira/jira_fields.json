@@ -1,0 +1,5 @@
+[
+  { "id": "summary", "name": "Summary", "custom": false, "orderable": true, "navigable": true, "searchable": true, "clauseNames": ["summary"] },
+  { "id": "customfield_10050", "name": "Acceptance Criteria", "custom": true, "schema": { "type": "any", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea" } },
+  { "id": "customfield_10500", "name": "Business Priority", "custom": true, "schema": { "type": "option" } }
+]

@@ -1,0 +1,39 @@
+{
+  "id": 84012,
+  "iid": 412,
+  "project_id": 101,
+  "title": "Retry failed webhook deliveries with exponential backoff",
+  "description": "Adds retries.",
+  "state": "opened",
+  "created_at": "2026-09-28T09:12:44.512Z",
+  "updated_at": "2026-09-30T16:03:10.871Z",
+  "target_branch": "main",
+  "source_branch": "feature/PAY-142-webhook-retries",
+  "author": { "id": 17, "username": "priya", "name": "Priya Natarajan" },
+  "labels": ["backend", "payments"],
+  "draft": false,
+  "detailed_merge_status": "not_approved",
+  "sha": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+  "references": { "short": "!412", "relative": "!412", "full": "payments/api!412" },
+  "web_url": "https://gitlab.example.com/payments/api/-/merge_requests/412",
+  "has_conflicts": false,
+  "changes_count": "7",
+  "head_pipeline": {
+    "id": 55120,
+    "iid": 3021,
+    "project_id": 101,
+    "sha": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+    "ref": "feature/PAY-142-webhook-retries",
+    "status": "success",
+    "source": "merge_request_event",
+    "created_at": "2026-09-30T16:01:00.000Z",
+    "updated_at": "2026-09-30T16:09:42.000Z",
+    "web_url": "https://gitlab.example.com/payments/api/-/pipelines/55120",
+    "coverage": "84.20"
+  },
+  "diff_refs": {
+    "base_sha": "1111111111111111111111111111111111111111",
+    "head_sha": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+    "start_sha": "2222222222222222222222222222222222222222"
+  }
+}

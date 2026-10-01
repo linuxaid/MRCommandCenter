@@ -1,0 +1,14 @@
+{
+  "id": "20017",
+  "key": "OPS-7",
+  "fields": {
+    "summary": "Nightly export times out",
+    "status": { "name": "Code Review", "statusCategory": { "key": "indeterminate" } },
+    "issuetype": { "name": "Bug" },
+    "assignee": null,
+    "priority": null,
+    "fixVersions": [],
+    "description": "The nightly export runs past the 2h window.\r\n\r\nh3. Acceptance Criteria\r\n* Export finishes within 90 minutes\r\n* Progress is logged every 10 minutes\r\n\r\nh3. Notes\r\nSee runbook.",
+    "customfield_10500": { "self": "https://jira.acme.com/rest/api/2/customFieldOption/3", "value": "P2", "id": "3" }
+  }
+}

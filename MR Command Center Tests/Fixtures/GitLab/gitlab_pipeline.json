@@ -1,0 +1,15 @@
+{
+  "id": 55120,
+  "iid": 3021,
+  "project_id": 101,
+  "status": "running",
+  "source": "merge_request_event",
+  "ref": "feature/PAY-142-webhook-retries",
+  "sha": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+  "web_url": "https://gitlab.example.com/payments/api/-/pipelines/55120",
+  "created_at": "2026-09-30T16:01:00.000Z",
+  "updated_at": "2026-09-30T16:02:11.000Z",
+  "started_at": "2026-09-30T16:01:05.000Z",
+  "finished_at": null,
+  "duration": null
+}
