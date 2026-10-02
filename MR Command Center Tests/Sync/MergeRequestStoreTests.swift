@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import MR_Command_Center
 
@@ -9,7 +10,7 @@ struct MergeRequestStoreTests {
 
         let outcome = try #require(await store.refresh(.manual))
 
-        #expect(store.mergeRequests.count == 8)
+        #expect(store.reviewerMergeRequests.count == 8)
         #expect(outcome.wasInitialLoad)
         #expect(outcome.newMergeRequestKeys.count == 8)
         #expect(outcome.detailFetches == 8)
@@ -82,13 +83,13 @@ struct MergeRequestStoreTests {
         let spy = SpyGitLabClient()
         let store = AppModel.testing(gitLab: spy).mergeRequests
         await store.refresh(.automatic)
-        let removedKey = try #require(store.mergeRequests.last?.key)
+        let removedKey = try #require(store.reviewerMergeRequests.last?.key)
 
         spy.edit { $0.data.entries.removeAll { $0.detail.key == removedKey } }
         await store.refresh(.automatic)
 
-        #expect(store.mergeRequests.count == 7)
-        #expect(!store.mergeRequests.contains { $0.key == removedKey })
+        #expect(store.reviewerMergeRequests.count == 7)
+        #expect(!store.reviewerMergeRequests.contains { $0.key == removedKey })
     }
 
     @Test func keepsCachedDataAndFlagsCredentialsOn401() async throws {
@@ -100,7 +101,7 @@ struct MergeRequestStoreTests {
         let outcome = await store.refresh(.manual)
 
         #expect(outcome == nil)
-        #expect(store.mergeRequests.count == 8)
+        #expect(store.reviewerMergeRequests.count == 8)
         guard case .credentials = store.problem else {
             Issue.record("Expected credentials problem, got \(String(describing: store.problem))")
             return
@@ -117,7 +118,7 @@ struct MergeRequestStoreTests {
         await store.refresh(.automatic)
 
         #expect(store.problem == .offline)
-        #expect(store.mergeRequests.count == 8)
+        #expect(store.reviewerMergeRequests.count == 8)
         #expect(store.lastRefreshedAt == lastRefreshed)
 
         spy.edit { $0.listFailure = nil }
@@ -132,9 +133,35 @@ struct MergeRequestStoreTests {
 
         await store.refresh(.automatic)
 
-        #expect(store.mergeRequests.count == 8)
+        #expect(store.reviewerMergeRequests.count == 8)
         #expect(store.problem == nil)
         #expect(store.mergeRequests.allSatisfy { $0.detailsError != nil && !$0.hasLoadedDetails })
+    }
+
+    @Test func draftsAreHiddenUntilTurnedOn() async throws {
+        let app = AppModel.testing(gitLab: SpyGitLabClient())
+        let store = app.mergeRequests
+        await store.refresh(.automatic)
+
+        #expect(store.mergeRequests.count == 7)
+        #expect(!store.mergeRequests.contains { $0.isDraft })
+        #expect(store.hiddenDraftCount == 1)
+
+        store.setShowsDrafts(true)
+        #expect(store.mergeRequests.count == 8)
+        #expect(store.hiddenDraftCount == 0)
+        #expect(AccountSettings.current(in: app.modelContainer.mainContext).showDraftMergeRequests, "The choice is saved")
+    }
+
+    @Test func hidingDraftsClearsADraftSelection() async throws {
+        let store = AppModel.testing(gitLab: SpyGitLabClient()).mergeRequests
+        store.setShowsDrafts(true)
+        await store.refresh(.automatic)
+        store.selectedKey = try #require(store.mergeRequests.first { $0.isDraft }).key
+
+        store.setShowsDrafts(false)
+
+        #expect(store.selectedKey == nil)
     }
 
     @Test func notConfiguredWithoutToken() async {

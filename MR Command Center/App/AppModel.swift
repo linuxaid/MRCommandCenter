@@ -47,8 +47,8 @@ final class AppModel {
     /// Refreshes the MR list, then runs static checks for any new head SHAs.
     func refresh(_ trigger: RefreshTrigger) async {
         await mergeRequests.refresh(trigger)
-        await jira.refresh(for: mergeRequests.mergeRequests, trigger: trigger)
-        await staticChecks.evaluateMissing(mergeRequests.mergeRequests)
+        await jira.refresh(for: mergeRequests.reviewerMergeRequests, trigger: trigger)
+        await staticChecks.evaluateMissing(mergeRequests.reviewerMergeRequests)
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {

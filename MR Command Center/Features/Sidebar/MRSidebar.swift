@@ -38,6 +38,14 @@ struct MRSidebar: View {
             }
         } else if store.isRefreshing {
             ProgressView("Loading merge requests…")
+        } else if store.hiddenDraftCount > 0 {
+            ContentUnavailableView {
+                Label("No Merge Requests", systemImage: "tray")
+            } description: {
+                Text("Only drafts are waiting for your review, and drafts are hidden.")
+            } actions: {
+                Button("Show Drafts") { store.setShowsDrafts(true) }
+            }
         } else {
             ContentUnavailableView(
                 "No Merge Requests",
@@ -131,6 +139,13 @@ private struct RefreshFooter: View {
                 Text("Not refreshed yet")
             }
             Spacer()
+            if store.hiddenDraftCount > 0 {
+                Button(store.hiddenDraftCount == 1 ? "1 draft hidden" : "\(store.hiddenDraftCount) drafts hidden") {
+                    store.setShowsDrafts(true)
+                }
+                .buttonStyle(.borderless)
+                .help("Show draft merge requests")
+            }
             Button {
                 Task { await refresh() }
             } label: {

@@ -1,167 +1,175 @@
-# MR Command Center — Build Plan
+# MR Command Center — Plan and Handoff
 
-Status: **Phase 7 complete.** Next: Phase 8 (notifications, polish) or the verification pass.
+**Status (October 1, 2026, end of session 1):** Phases 1–7 are complete, plus several scope additions (listed below). **196 tests pass.** The app builds, runs in mock mode, and has been exercised against the real on-device model. It has **not** been run against a real GitLab or Jira instance yet.
 
-## Platform decisions
+**Session 2 (October 2, 2026):** testing with real data started.
+- **Draft MRs are hidden by default.** The setting is `AccountSettings.showDraftMergeRequests`, toggled from View → Show Draft Merge Requests or the "N drafts hidden" link in the sidebar footer. `MergeRequestStore.mergeRequests` is the visible list; `reviewerMergeRequests` includes drafts, and Jira and static checks still run on it so toggling is instant. Phase 8 notifications should skip hidden drafts.
+- **The Swift skill was rewritten:** concrete, checkable bug patterns (crashes, errors, memory, concurrency, SwiftUI, Codable), plus a "never flag" line. It's 514 real tokens of the shared 600-token budget, so another skill matching `*.swift` (or `*`) will usually be dropped. Unedited built-in skills upgrade on launch through `DefaultSkills.previousContents`. Not yet measured against real Swift MRs.
 
-- **Build SDK:** macOS 27.0 SDK (Xcode 27.0, installed on this machine).
-- **Minimum macOS: 26.4.** Checked against the SDK's FoundationModels interface:
-  - `SystemLanguageModel.tokenCount(for:)` (prompt, instructions, tools, schema, transcript) first appears in **26.4**.
-  - `SystemLanguageModel.contextSize` is back-deployed to 26.0, so it doesn't limit the choice.
-  - 26.4 is the lowest version that has both APIs the spec requires.
-  - Cost: macOS 27 replaces `LanguageModelSession.GenerationError` with the new `LanguageModelError`, which adds `contextSizeExceeded(contextSize:tokenCount:)`, `timeout`, `rateLimited` and more. A small `ReviewFailure` mapping layer handles both. I can only exercise the 27 path on this Mac, so the 26.x branch will be compile-checked but not run. If everyone who will run this is on 27, I'd raise the minimum to 27 and delete that branch.
-- **Swift 6 language mode** with strict concurrency. Swift Testing (`@Test`) for unit tests.
-- **No third-party runtime dependencies.** Project generation tool: see open question 1.
+**Start the next session here:** read "Where we are" and "Next steps" below. Everything after those sections is reference.
 
-## Apple's Evaluations framework: verdict
+---
 
-The framework is `Evaluations.framework`. It ships in Xcode's `Platforms/MacOSX.platform/Developer/Library/Frameworks`, next to XCTest and Testing, not in the SDK. Its `EvaluationTrait` is a Swift Testing `TestTrait`. That makes it a **test-time framework that can't be linked into the shipping app**. So:
+## Where we are
 
-- The **in-app** eval tooling (eval sets, batch rerun, compare table, feedback, export) is built directly.
-- Optional in phase 6: an `MRCommandCenterEvals` test target that uses `Evaluations`. It loads an eval set exported from the app through `JSONLoader`, runs the same `ReviewEngine`, and reports aggregate metrics in Xcode's test report. I'll confirm the API fits when I get there.
+| Phase | State | Notes |
+|---|---|---|
+| 1. Skeleton, Keychain, Accounts | ✅ Done | Tokens in Keychain; connection details in SwiftData; Test Connection for GitLab and Jira |
+| 2. GitLab client + reviewer MR list | ✅ Done | Pagination, 401/403/429/offline, caching by `updated_at`, polling, ⌘R |
+| 3. MR detail: Overview + Changes | ✅ Done | Unified and side-by-side diffs, every special case (binary, renames, collapsed, overflow) |
+| 4. Static checks | ✅ Done | 12 checks; diff checks cached per head SHA + settings fingerprint |
+| 5. On-device AI review | ✅ Done | Per-file sessions, token budgeting and splitting, merge step, skills |
+| 6. Evaluation tooling | ✅ Done | Prompt editor, 👍/👎 feedback, eval sets, batch compare, JSON export |
+| 7. Jira | ✅ Done (mock only) | Story vs. code in the AI review, status and priority checks, setup preview |
+| 8. Notifications + polish | ⬜ Not started | AI summary posting was already pulled forward |
 
-## Project structure
+### Verified so far
+- **Unit and integration tests:** 196 tests, all against mock GitLab/Jira and a fake model.
+- **Layout regression test:** the window-resize stress test in `UI/LayoutStressTests`.
+- **Real on-device model (live runs):**
+  - The 6-case mock eval set ran on two prompt versions with 0 errors.
+  - Story-vs-code checks caught all 3 planted story/code mismatches.
+- **Visual checks:** off-screen renders of the main screens, in light and dark.
+
+### Not verified yet (needs the user's real environment)
+- **Real GitLab** (self-managed, 15.7+):
+  - reviewer list, diffs and discussions
+  - posting inline comments and summary threads (needs a token with the `api` scope)
+  - whether approving an MR bumps its `updated_at`; if not, approval counts go stale between other changes
+- **Real Jira:** the acceptance-criteria field ID, how the team writes criteria, passing-status names. Use Settings → Accounts → **Check the setup** to preview an issue.
+- **Hands-on use:** the user hasn't clicked through the toolbar, menus or keyboard shortcuts in the running app since the later changes.
+
+### Known issue: AI verdict calibration
+On the mock eval set, verdict agreement is **1/6** for both prompt versions. The model reliably finds the real problems (recall 4/5 and 5/5) but rates almost everything "Likely problem", because it adds speculative high-severity concerns. Prompt wording alone didn't fix it.
+
+---
+
+## Next steps (in priority order)
+
+1. **Verification pass (recommended next).** For each high or medium concern, run a short follow-up session: "Is this a real bug in the shown diff? yes/no". Drop or downgrade the concerns that fail, then recompute the verdict.
+   - Make it a setting so it can be compared with and without.
+   - It costs about 2–3 seconds per concern.
+   - Measure it in the Evaluation window against `v1` on the mock eval set. The goal is to raise verdict agreement above 1/6 without losing recall.
+2. **Real-environment check** (when the user has access):
+   - Connect GitLab and confirm the list, diffs and comments work.
+   - Approve an MR and check whether the count updates after ⌘R.
+   - Preview 2–3 Jira issues with the setup tool, and set the acceptance-criteria field ID.
+3. **Build a real eval set.** 5–10 real MRs with known answers, including some clean ones. The mock set is only a smoke test.
+4. **Phase 8:**
+   - macOS notifications, as optional toggles that already exist in `AccountSettings`: a new MR assigned for review, and a failed pipeline on an MR you're reviewing (reviewer MRs only, per the user's choice).
+   - `RefreshOutcome` already reports `newMergeRequestKeys` and `newlyFailedPipelineKeys`; ignore it on the initial load.
+   - Then an accessibility pass (VoiceOver labels exist; test with VoiceOver), Dynamic Type, and a final light/dark review.
+5. **Optional, smaller items:**
+   - "Post all AI comments…" with checkboxes in one preview
+   - resolving threads from the app
+   - a release-version check (deferred: the user hasn't defined what "correct" means yet)
+   - syntax highlighting in diffs
+   - an Evaluations-framework test target that loads the JSON export
+
+### Open questions for the user
+- Should approvals be fetched on every refresh? This depends on the `updated_at` check in "Not verified yet".
+- Should missing approvals stay a **warning**, or become a failure?
+- **Release version check:** what makes a fix version "correct" (target branch, milestone, a configured list)? Skipped for now.
+- Raise the minimum macOS to 27 if everyone runs it? That would drop the macOS 26.x error-mapping branch, which can't be exercised on this Mac.
+
+---
+
+## How to work on this project
+
+- **Open:** `MR Command Center.xcodeproj` (Xcode 27). Scheme: `MR Command Center`. Its Run action passes `-UseMockData`, which the user has ticked; untick it to use real accounts.
+- **Build and test from the command line:**
+
+  ```bash
+  xcodebuild -project "MR Command Center.xcodeproj" -scheme "MR Command Center" -destination "platform=macOS" test
+  ```
+
+- **Mock mode (`-UseMockData`):**
+  - mock GitLab with 8 MRs, rich diffs, discussion threads and Jira issues
+  - an in-memory database and in-memory tokens; comment posting is enabled since nothing real is touched
+  - the **real** on-device model when it's available
+- **Git:** the repo is on `main` with one commit (`first commit`), covering everything through phase 7 plus the scope additions. `AI Coding Pilot Brief.pdf` is untracked (a manager brief; not part of the app).
+- **Signing:** team `3BR8562V2D`, automatic. Bundle ID `com.weinnotes.MRCommandCenter`.
+- **Local data:** `~/Library/Containers/com.weinnotes.MRCommandCenter/Data/Library/Application Support/default.store`. Tokens are in the Keychain under service `com.weinnotes.MRCommandCenter.tokens`.
+
+### Gotchas learned in session 1
+- **SwiftData lifetime:** keep a reference to the `ModelContainer` (or the `AppModel` that owns it) for as long as models are used. A `ModelContext` alone doesn't retain its container, and tests that dropped the `AppModel` crashed. Services hold the container for this reason.
+- **AppKit layout loops:** the original crash with every panel open came from content-dependent minimum widths, a `Grid` in Overview, `HSplitView` in Changes, and SwiftUI's `.inspector`. Two changes fixed it:
+  - The detail column has a fixed minimum width.
+  - The inspector is a custom panel (`InspectorPanel`) inside the detail column, not `.inspector`.
+
+  `LayoutStressTests` guards this; keep it passing.
+- **`FlowLayout`** must report the width it actually uses, never echo the proposal.
+- **Double quotes break the on-device model's structured output.** When it copies `"` from code (for example `loading="lazy"`), the JSON string ends early and you get "GeneratedContent does not contain a property…". `QuoteSafety` sends code with single quotes plus a note in the instructions. In a live comparison that parsed 10/10 files, versus 9/10 unchanged and 8/10 with a full-width quote. Parse failures also retry once with sampling.
+- **Wrapped code hyphenates** unless the text is marked `.typesettingLanguage(.code)` (the `zxx` language).
+- **`\r\n`** is one Swift `Character`. Split diffs with `whereSeparator: \.isNewline`, not `"\n"`.
+- **Main-actor default isolation:** network types, DTOs and `@Generable` types must be `nonisolated`. `Regex` isn't `Sendable`, so secret rules are compiled per scan.
+- **Off-screen snapshots for visual checks:** the user declined screen-control access, so the screens were checked by rendering them off-screen. The method:
+  - Render with `NSHostingView` + `cacheDisplay` in a test, and print the PNG as base64 into the log. The sandbox blocks reading the test host's container.
+  - Paint an opaque background first.
+  - The sidebar's vibrancy and the toolbar don't capture correctly.
+
+---
+
+## Architecture (as built)
 
 ```
 MR Command Center/
-  project.yml                      (if XcodeGen; .xcodeproj is generated and committed)
-  MRCommandCenter/
-    App/            MRCommandCenterApp (WindowGroup + Settings scene), AppModel (@Observable, @MainActor), Commands
-    Core/           Keychain (SecretStore protocol, KeychainSecretStore, InMemorySecretStore),
-                    HTTP (HTTPTransport protocol, pagination, 401/403/429 handling, Retry-After), Log (os.Logger)
-    GitLab/         GitLabAPI protocol, LiveGitLabClient (actor), MockGitLabClient, DTOs
-    Jira/           JiraAPI protocol, JiraAuth { cloudBasic(email, token), dataCenterBearer(token) },
-                    LiveJiraClient, Mock, JiraKeyExtractor, AcceptanceCriteriaParser (ADF → text)
-    Persistence/    @Model types, ModelContainer setup, PreviewData
-    Sync/           RefreshCoordinator, CachePolicy (pure functions: refetch details? rerun AI? refetch Jira?)
-    Diff/           UnifiedDiffParser (hunks, old/new line numbers), DiffFile model
-    Checks/         StaticChecks (pure), PatternScanner (secrets, debug output, TODO/FIXME)
-    AIReview/       ModelAvailability, @Generable outputs, PromptBuilder (token budgeting/hunk splitting),
-                    ReviewEngine (actor; per-file sessions, concurrency limit, cancel), MergeStep,
-                    Tools (FetchFileContentTool, SurroundingLinesTool), TranscriptRecorder, ReviewFailure
-    Evaluation/     EvalSnapshotter, BatchRunner, ComparisonReport, JSONExporter
-    Features/       Sidebar, Detail/{Overview, Changes (DiffView), AIReview}, Inspector,
-                    Settings/{Accounts, Prompts, Checks, AI}, Eval/{EvalSets, Compare}, Onboarding
-    Resources/      Assets, MRCommandCenter.entitlements (app-sandbox + network.client only)
-  MRCommandCenterTests/            Swift Testing + Fixtures/*.json (GitLab and Jira responses)
-  MRCommandCenterEvals/            (phase 6, optional) Evaluations-framework target
+  App/          MRCommandCenterApp (main Window, Evaluation Window ⇧⌘E, Settings), AppModel, AppCommands, AppDependencies
+  Core/         HTTP (HTTPClient: retry/429/offline, pagination, JSON decoding), Keychain (SecretStore), Logging (os.Logger), ClientFactory
+  GitLab/       GitLabAPI, LiveGitLabClient, MockGitLabClient + MockDiffs + MockDiscussions, DTO/
+  Jira/         JiraAPI, LiveJiraClient, MockJiraClient (+ MockJiraData), JiraAuth, JSONValue, ADFRenderer + AcceptanceCriteriaExtractor, JiraKeyExtractor, DTO/
+  Diff/         UnifiedDiffParser, DiffFile/MRDiff, SideBySide, ThreadPlacement
+  Checks/       CheckModels, StaticChecks (pure), PatternScanner, TestFileClassifier
+  AIReview/     ReviewEngine, ReviewModel (OnDeviceReviewModel, tools, error mapping), PromptBuilder, ModelOutputs (@Generable),
+                ReviewResults, ModelAvailability, AIReviewService, AIConcernPlacement (+ AICommentFormatter), SummaryPoster, QuoteSafety, Skills/
+  Evaluation/   EvalService, EvalMetrics (pure), ExportService
+  Sync/         MergeRequestStore, CachePolicy (pure), DiffService, DiscussionService, StaticCheckService, JiraService
+  Persistence/  AppModelContainer, Models/ (AccountSettings, TrackedMR, DiffSnapshot, StaticCheckSnapshot, JiraCheck,
+                ReviewSkill, PromptVersion, AIReviewRun/FileReviewRecord/ConcernRecord, EvalCase/EvalBatch)
+  Features/     Root (RootView, InspectorPanel), Sidebar, Detail/{Overview, Changes, AIReview, StaticChecksSection},
+                Evaluation, Settings/{Accounts, General, Checks, Skills, AI Review, Prompts}, Shared
+MR Command Center Tests/   Swift Testing; Support/ (StubTransport, SpyGitLabClient, SpyJiraClient, FakeReviewModel), Fixtures/
 ```
 
-The core types are UI-free and pure where possible: CachePolicy, StaticChecks, JiraKeyExtractor, UnifiedDiffParser and PromptBuilder budgeting. That makes the required unit tests straightforward.
+**Data flow.**
+1. `AppModel.refresh(trigger)` calls `MergeRequestStore.refresh`, then `JiraService.refresh`, then `StaticCheckService.evaluateMissing`.
+2. The AI review (`AIReviewService.start`) gathers its inputs: the diff (`DiffService`), static findings, the story context (`JiraService`), enabled skills and the active `PromptVersion`.
+3. It hands those to `ReviewEngine`, which is pure and model-agnostic.
+4. The results are saved as `AIReviewRun` → `FileReviewRecord` → `ConcernRecord`.
 
-## Data model (SwiftData) — changes from the spec
+**Caching rules**, all in `CachePolicy` and tested:
+- MR details are refetched only when `updated_at` changed; an active pipeline is re-polled on its own.
+- Diffs and diff checks run once per head SHA. Diff checks also rerun when the check settings change.
+- An AI review runs only when the head SHA or prompt version changed; "Rerun" is explicit.
+- A Jira issue in a passing status is skipped on automatic refreshes; manual refreshes always refetch.
 
-| Model | Notes / changes |
-|---|---|
-| `AccountSettings` | Singleton row. Holds everything in the spec, plus: `jiraDeployment` (cloud / dataCenter), the **Keychain account identifiers** (not tokens), `aiConcurrencyLimit` (default 1), `aiToolsEnabled`, `debugPatterns` (configurable list), `testFileGlobs` / `sourceFileGlobs`, `postCommentsEnabled`, notification toggles, `activePromptVersionID`. |
-| `TrackedMR` | As specified. Also: `isDraft`, `hasConflicts`, `labels`, `descriptionText`, `detailsFetchedAtUpdatedAt`, and `isInReviewerList`. When an MR leaves the reviewer list it is kept but hidden, so runs and eval cases stay intact. |
-| `DiffSnapshot` *(new)* | Diff files for one `(MR, headSHA)`: parsed files encoded as `Data`, plus overflow and collapsed flags. Fetched lazily (Changes tab or AI run) and reused by eval snapshots. |
-| `StaticCheckSnapshot` *(new)* | Static check results cached per head SHA, as the spec requires. |
-| `JiraCheck` | As specified, plus `summary`, `issueType`, `assignee` and `lastStatusCategory`. |
-| `PromptVersion` | Holds **two** instruction texts: `fileInstructions` (per-file sessions) and `mergeInstructions` (verdict session). Both are versioned together. |
-| `AIReviewRun` | As specified, plus: `status` (running / completed / cancelled / failed), the `mrProjectID` / `mrIID` copy (survives MR deletion), an optional `evalCase` and `evalBatch`, and `verdictFeedback` + `verdictNote`. |
-| `FileFinding` | As specified. The **file path is filled in by code, not generated by the model**, which avoids hallucinated paths. Also stores `partCount` (for hunk-split files), `errorKind`, token counts and latency per file, the exact instructions and prompt sent, and the tool-call log. |
-| `ConcernRecord` *(new)* | Split out of `FileFinding` so each concern has an identity for 👍/👎 + note. |
-| `EvalCase` *(new)* | MR identity, `headSHA`, `expectedVerdict`, `expectedConcerns` ([file, description]), and a **snapshot** of the diff, the Jira summary/AC and the static flags. Also caches any full-file contents the tool fetched, so later runs are reproducible. |
-| `EvalBatch` *(new)* | One run of the eval set against a single `PromptVersion`. Its runs feed the comparison table. |
+**Model seam.** `ReviewLanguageModel` has two implementations: `OnDeviceReviewModel` (Foundation Models) and `FakeReviewModel` (tests). `AppDependencies.reviewModel` and `.modelStatus` are injectable.
 
-Arrays and enums are stored as encoded `Data` with typed accessors. SwiftData's composite Codable attributes are still fragile with migrations, and this sidesteps that.
+---
 
-## Sync and caching rules
+## Scope changes from the original spec (all at the user's request)
 
-- Every refresh fetches the reviewer list: `GET /merge_requests?state=opened&scope=all&reviewer_id=<me>`, paginated. It's cheap.
-- Details, approvals and discussions are refetched **only if `updated_at` changed**.
-  - **Caveat to verify on your instance:** a pipeline finishing doesn't always bump MR `updated_at`. While the cached head pipeline is non-terminal (running or pending), I'll also refetch just the head pipeline on each poll. That's one cheap call per active MR.
-- Diffs are fetched lazily per head SHA through `/projects/:id/merge_requests/:iid/diffs` (paginated). The `overflow` flag and per-file `collapsed` / `too_large` flags each get a clear message and an "Open in browser" link.
-- AI review runs only when `headSHA` ≠ the last *successful* run's SHA for the *active prompt version*. The UI shows "Reviewed at `abc1234`" and an explicit **Rerun** button.
-- 401/403 shows a banner with "Fix token" (opens Accounts). 429 sleeps for `Retry-After`, then retries, at most N times. When offline (`URLError.notConnectedToInternet` etc.), the app shows cached data and an "Offline — showing data from <time>" banner.
-
-## AI review design
-
-1. **Availability.** `SystemLanguageModel.default.availability` is checked at launch and before every run. Each unavailable reason gets its own explanation (Apple Intelligence off, device not eligible, model downloading). Everything else in the app works without the model.
-2. **Per-file sessions.** Binary and deleted-only files are skipped and recorded as skipped. The input is: the instructions, then the Jira summary + AC, or an explicit "No acceptance criteria available (Jira not connected)", then the file's static flags, then diff hunks with new-side line numbers.
-3. **Token budget.** The budget is `contextSize − tokenCount(instructions) − tokenCount(schema) − tokenCount(tools) − response reserve`. If a file doesn't fit, its hunks are packed greedily into parts, one session per part. A single hunk that's too big on its own is split by lines. The parts' findings are merged deterministically (concerns concatenated and deduplicated, confidence = minimum).
-4. **Generation options.** Default to **greedy sampling** so eval runs are reproducible. Temperature is configurable in the AI settings.
-5. **Merge step.** A fresh session receives the compact per-file findings (not the diffs) plus the AC, and generates `MRVerdict`.
-6. **Concurrency.** A TaskGroup with a configurable limit (default 1). Per-file progress is streamed to the UI, and **Cancel** cancels the group.
-7. **Errors are per file.** Context exceeded, guardrail, unsupported language, refusal and timeout each mark only that file failed. The merge step is told which files couldn't be reviewed.
-8. **Tools (flag).** `fetch_file_content(path)` at the head SHA and `surrounding_lines(path, line, radius)`. Every call is logged into the transcript and the inspector.
-
-`@Generable` outputs (sketch):
-
-```swift
-@Generable struct FileFindingOutput {
-  var summary: String
-  var meetsCriteria: CriteriaMatch          // yes / partially / no / unclear
-  @Guide(.maximumCount(5)) var concerns: [ConcernOutput]
-  var confidence: Confidence                // low / medium / high
-}
-@Generable struct ConcernOutput { var lineHint: String; var severity: Severity; var explanation: String }
-@Generable struct MRVerdictOutput {
-  var status: VerdictStatus                 // looksGood / needsHumanReview / likelyProblem
-  var criteriaCoverage: String
-  @Guide(.maximumCount(5)) var topConcerns: [String]
-  var rationale: String
-}
-```
-
-## Evaluation tooling
-
-- **Inspector.** Per file or MR run: the exact instructions and prompt, the full transcript including tool calls, token counts (input, output, total, and context size), latency, and the raw structured output as JSON.
-- **Prompt versions.** An editor for both instruction texts. *Save as new version* is the only way to change one, so versions are immutable once runs reference them. An active-version picker. A seeded `v1` default.
-- **Feedback.** 👍/👎 + note on every concern and on the verdict.
-- **Eval set.** "Add to eval set" on any MR at its current SHA. It asks for the expected verdict and expected concerns, then snapshots diff, Jira and static flags.
-- **Batch and compare.** Pick a prompt version and run every eval case against its snapshot. The comparison table has one row per prompt version and these columns:
-  - verdict agreement %
-  - helpful / wrong concerns (from feedback on that batch's runs)
-  - **expected-concern recall**: an automatic proxy, counting an expected concern as hit when the model raised a concern on that file
-  - average latency
-  - average tokens
-  - error count
-- **Export.** JSON of runs, findings, concerns, feedback, prompt versions and eval cases, through `NSSavePanel` (sandbox user-selected-file access is read-write only for the chosen file). The same format is what the Evaluations test target loads.
-
-> Note: Export through a save panel needs the `com.apple.security.files.user-selected.read-write` entitlement, on top of outgoing network. That's the only addition to "network only," and it's limited to files you pick. OK?
-
-## Build order (app stays runnable after each phase)
-
-1. **Skeleton.** XcodeGen/project, entitlements, `@Observable` AppModel, `SecretStore`/Keychain wrapper and tests, SwiftData container, Accounts screen (settings in SwiftData, tokens in Keychain, test-connection buttons, scope hints, update/remove), onboarding redirect, empty three-column shell.
-2. **GitLab.** Client protocol, live and mock clients, DTO decoding tests with fixtures, pagination/401/429/offline, reviewer MR list with the status line, CachePolicy and its tests, auto poll + ⌘R, last-refreshed time, next/previous MR, ⌘O.
-3. **Detail.** Overview section, Changes section with the diff parser and its tests, unified diff view, large/binary/renamed/new/deleted/collapsed/overflow handling, lazy diff caching. Side-by-side view and syntax highlighting are stretch goals.
-4. **Static checks.** GitLab-based checks plus the pattern scanner and tests, cached per SHA, shown prominently in Overview and the sidebar. Jira checks show "Pending (Jira not configured)".
-5. **AI review.** Availability UI, the `@Generable` types, PromptBuilder with token budgeting and splitting, ReviewEngine with concurrency, cancel and per-file errors, the merge step, the AI Review tab, ⌘⇧R, "Reviewed at sha" / Rerun. The tools are behind a flag.
-6. **Evaluation.** Inspector, prompt version editor, feedback, eval sets with snapshots, batch runner, compare table, JSON export. Optionally the Evaluations test target.
-7. **Jira.** Client (Cloud Basic; protocol ready for DC Bearer), key extraction and its tests, AC field with description fallback, passing-status caching, AC fed into the AI review, Jira checks lit up.
-8. **Polish.** Opt-in "Post AI summary as comment" (preview + confirm, `api` scope hint), notifications (new review request, pipeline failed), accessibility pass, light/dark, Dynamic Type.
-
-At the end of each phase I build with `xcodebuild`, run the tests, launch the app, and screenshot it to verify. Then I summarize what was built, what's stubbed, and what I need from you.
-
-## Scope changes
-
-- **Inline diff comments (added after phase 3, at your request).** Diff threads are shown on their lines. Comments left on an older version go in an "Outdated" group, comments on lines outside the shown hunks get their own group, and comments on files no longer in the diff are flagged. You can **start new inline threads and reply** to existing ones. Posting sits behind Settings → Accounts → "Allow posting comments" (off by default) and needs a token with the `api` scope. This extends the spec's original "read-only except the AI summary comment" rule. Resolving threads, editing, and suggestions are not in scope.
-
-- **AI concerns as diff comments (added after phase 5, at your request).** Concerns from the latest AI review at the current head show inline in the Changes diff, in purple with an "AI" label, and you can hide them. Concerns whose line can't be matched are grouped at the top of the file. "Post to GitLab…" opens an editable preview and posts only on confirmation. The body always starts with "_Comment generated via MR Command Center_ 😃", which is re-added if edited out. Each concern records that it was posted, so it can't be posted twice. Posting uses the same "Allow posting comments" setting and `api` scope as inline comments.
-- **AI workflow polish (after phase 5).**
-  - A "Review with AI" / "Rerun" / "Cancel" button in the toolbar on every tab; the inspector toggle sits after the segmented control.
-  - AI comments can be dismissed. "Open" means not posted and not dismissed, and the sidebar chip shows the open count ("AI: needs review · 2 open").
-  - "Post Summary to GitLab…" posts the verdict, rationale, open concerns and static checks as a resolvable thread on the MR. It's attributed, uses an editable preview, posts once per run, and is only offered when there are issues. This brings forward the spec's phase 8 "Post AI summary as MR comment".
-- **Jira scope (phase 7, per your answers).**
-  - The AI review compares the code against the whole story: summary, description and acceptance criteria.
-  - A **priority check** passes when a priority is set and isn't a placeholder like "None". It uses the standard field by default, or a configurable custom field ID.
-  - **No release-version check for now.** Fix versions are only displayed in the Overview.
-  - **Setup check:** Settings → Accounts → "Check the setup" previews an issue and suggests custom field IDs.
-- **Review skills (added in phase 5, at your request).** These are language and area guidance files (Python, TypeScript, Swift, Go, Terraform and SQL to start). They're added to the model's instructions for files whose path matches the skill's globs. They're managed in Settings → Skills:
-  - Create and edit skills; every save creates a new version.
-  - Enable or disable them; delete them.
-  - Import and export them as `.md` files with a `name` / `applies_to` header.
-  - Restore the starter set, and test which skills a path matches.
-  - Each run records the skill versions it used. Skills share a 600-token budget per file.
+- **Inline diff comments:**
+  - Threads appear on their lines, with outdated, off-diff and orphaned groups.
+  - You can start new threads and reply. Posting needs the "Allow posting comments" setting and an `api`-scope token.
+- **AI concerns as diff comments:**
+  - They appear in purple with an "AI" label, and can be dismissed.
+  - "Post to GitLab…" opens an editable preview. The text always starts with "_Comment generated via MR Command Center_ 😃", and each concern can be posted only once.
+- **AI summary thread on the MR:** a resolvable thread with the verdict, rationale, open concerns and static checks. It's offered when there are issues, once per run.
+- **AI workflow:**
+  - The toolbar has Review with AI / Rerun / Cancel on every tab, and the inspector toggle sits after the segmented control.
+  - The sidebar shows an AI verdict badge above the title, with an open-comment count.
+- **Review skills:** per-language guidance (6 starters), matched by globs. Settings → Skills: edit with versions, enable or disable, import and export `.md`, test a path. They share a 600-token budget per file, and runs record the skill versions they used.
+- **Jira scope:** the review compares the code against the whole story (summary, description and acceptance criteria). A priority check passes when a priority is set and isn't a placeholder; the release-version check is deferred and fix versions are display-only. Settings → Accounts has a setup preview.
+- **Labels:** GitLab labels are shown in their colors in the sidebar and Overview.
 
 ## Decisions
 
-- **Project:** your hand-made `.xcodeproj` with folders the project picks up automatically, no XcodeGen. App sources are in `MR Command Center/`, tests in `MR Command Center Tests/`, plus a shared scheme.
-- **GitLab:** self-managed, 15.7 or later, so the paginated `/diffs` endpoint is used directly.
-- **Signing:** you said "sign to run locally," but the project already had team `3BR8562V2D` and this Mac has Apple Development certificates, so I kept it. Signed builds stop the Keychain from asking for access after every rebuild.
-- **Pipeline-failed notifications:** only MRs you're reviewing.
-- **Bundle ID:** `com.weinnotes.MRCommandCenter`.
-- **Swift:** version 6 language mode. Code runs on the main actor by default; network and model types are explicitly `nonisolated`.
-- **Inspector:** a `.inspector` panel next to a two-column `NavigationSplitView`. This is the standard macOS way to get a third column you can toggle.
+- **Minimum macOS 26.4, built with the macOS 27 SDK.** `tokenCount(for:)` first appears in 26.4. Errors from both 26.x (`GenerationError`) and 27 (`LanguageModelError`) are mapped.
+- **Swift 6.** Code runs on the main actor by default, Swift Testing is used, and there are no third-party dependencies.
+- **Project:** a hand-made `.xcodeproj` that picks up the source folders automatically, with a shared scheme and a hosted test target.
+- **GitLab:** self-managed, 15.7 or later (paginated `/diffs`). The reviewer list uses `reviewer_id`.
+- **Sandbox entitlements:** outgoing network, plus read-write access to files you pick (for skill import/export and the JSON export).
+- **Apple's Evaluations framework** only works inside test targets, so the evaluation tooling is built into the app; a test target that uses the framework is optional.
+- **AI defaults:** deterministic (greedy) output, files reviewed one at a time, the file-reading tool off. Eval batches never use tools.
+- **Posting to GitLab:** always previewed and confirmed, always attributed, and gated by the setting. The app never approves, merges, or edits Jira issues.

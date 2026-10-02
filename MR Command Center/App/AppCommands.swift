@@ -44,6 +44,11 @@ struct AppCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
             }
             Divider()
+            Toggle("Show Draft Merge Requests", isOn: Binding(
+                get: { store.showsDrafts },
+                set: { store.setShowsDrafts($0) }
+            ))
+            Divider()
             Button(appModel.isInspectorPresented ? "Hide Inspector" : "Show Inspector") {
                 appModel.isInspectorPresented.toggle()
             }

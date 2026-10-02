@@ -116,6 +116,26 @@ struct AIReviewServiceTests {
         #expect(try context.fetchCount(FetchDescriptor<ReviewSkill>()) == DefaultSkills.all.count)
     }
 
+    @Test func uneditedBuiltInSkillsUpgradeAndEditedOnesStay() throws {
+        let old = try #require(DefaultSkills.previousContents["Swift"]?.first)
+        let current = try #require(DefaultSkills.all.first { $0.name == "Swift" }).content
+        let unedited = ReviewSkill(name: "Swift", appliesTo: ["*.swift"], content: old, isBuiltIn: true)
+        let edited = ReviewSkill(name: "Swift", appliesTo: ["*.swift"], content: "- Our own rules.", isBuiltIn: true)
+
+        DefaultSkills.upgrade([unedited, edited])
+
+        #expect(unedited.content == current)
+        #expect(unedited.version == 2)
+        #expect(edited.content == "- Our own rules.")
+        #expect(edited.version == 1)
+    }
+
+    @Test func swiftSkillFitsTheSkillBudget() async throws {
+        let swift = try #require(DefaultSkills.all.first { $0.name == "Swift" })
+        let tokens = try await EstimatingTokenCounter().count(swift.content) + 6
+        #expect(tokens <= PromptBuilder.maxSkillTokens)
+    }
+
     @Test func runIsPersistedWithFilesConcernsSkillsAndVerdict() async throws {
         let model = FakeReviewModel()
         model.edit { $0.concernsByPath["app/webhooks/delivery.py"] = [ConcernResult(lineHint: "42", severity: .high, explanation: "Debug print.")] }

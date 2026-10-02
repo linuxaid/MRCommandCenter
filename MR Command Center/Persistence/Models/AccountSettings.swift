@@ -35,6 +35,8 @@ final class AccountSettings {
     /// Extra path substrings that mark a file as a test (on top of the built-in rules).
     var extraTestPathPatterns: [String] = []
     var lastMergeRequestRefreshAt: Date?
+    /// Draft MRs are hidden from the list unless this is on.
+    var showDraftMergeRequests: Bool = false
 
     // AI review
     var aiConcurrencyLimit: Int = 1

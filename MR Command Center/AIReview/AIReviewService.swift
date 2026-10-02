@@ -360,6 +360,8 @@ final class AIReviewService {
                 context.insert(ReviewSkill(name: skill.name, appliesTo: skill.appliesTo, content: skill.content, isBuiltIn: true))
             }
             settings.didSeedDefaultSkills = true
+        } else {
+            DefaultSkills.upgrade((try? context.fetch(FetchDescriptor<ReviewSkill>())) ?? [])
         }
         save()
     }

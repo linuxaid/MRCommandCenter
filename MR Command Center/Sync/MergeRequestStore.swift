@@ -29,7 +29,11 @@ struct RefreshOutcome: Equatable {
 /// and persists `TrackedMR` rows.
 @Observable
 final class MergeRequestStore {
+    /// Every open MR where the user is a reviewer, drafts included. Jira and static checks run on these.
+    private(set) var reviewerMergeRequests: [TrackedMR] = []
+    /// The MRs the list shows: drafts are left out unless `showsDrafts` is on.
     private(set) var mergeRequests: [TrackedMR] = []
+    private(set) var showsDrafts = false
     var selectedKey: String?
     private(set) var isRefreshing = false
     private(set) var problem: RefreshProblem?
@@ -46,8 +50,19 @@ final class MergeRequestStore {
     init(container: ModelContainer, dependencies: AppDependencies) {
         self.container = container
         self.dependencies = dependencies
-        lastRefreshedAt = AccountSettings.current(in: context).lastMergeRequestRefreshAt
+        let settings = AccountSettings.current(in: context)
+        lastRefreshedAt = settings.lastMergeRequestRefreshAt
+        showsDrafts = settings.showDraftMergeRequests
         reloadFromStore()
+    }
+
+    var hiddenDraftCount: Int { reviewerMergeRequests.count - mergeRequests.count }
+
+    func setShowsDrafts(_ isOn: Bool) {
+        guard isOn != showsDrafts else { return }
+        showsDrafts = isOn
+        AccountSettings.current(in: context).showDraftMergeRequests = isOn
+        finish()
     }
 
     var selected: TrackedMR? {
@@ -61,10 +76,11 @@ final class MergeRequestStore {
             sortBy: [SortDescriptor(\.lastSeenUpdatedAt, order: .reverse)]
         )
         do {
-            mergeRequests = try context.fetch(descriptor)
+            reviewerMergeRequests = try context.fetch(descriptor)
         } catch {
             Log.persistence.error("Fetching tracked MRs failed: \(error.localizedDescription, privacy: .public)")
         }
+        mergeRequests = showsDrafts ? reviewerMergeRequests : reviewerMergeRequests.filter { !$0.isDraft }
         if let selectedKey, !mergeRequests.contains(where: { $0.key == selectedKey }) {
             self.selectedKey = nil
         }
