@@ -343,6 +343,9 @@ actor Mirror {
 
         let metadata = directory.appending(path: "metadata.json")
         try repo.metadataJSON().write(to: metadata)
+        // publish requires the scratch directory to exist already.
+        let scratch = directory.appending(path: "scratch")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         logger.info("publishing \(label) to \(config.swiftLocal)…")
 
         let result = try shell.run([
@@ -350,7 +353,7 @@ actor Mirror {
             "--url", config.localRegistryURL.absoluteString,
             "--package-path", packageRoot.path,
             "--metadata-path", metadata.path,
-            "--scratch-directory", directory.appending(path: "scratch").path,
+            "--scratch-directory", scratch.path,
         ] + netrcArguments + swiftVerbosity)
         guard result.succeeded else {
             var message = "publish failed:\n\(indent(result.combinedOutput))"
