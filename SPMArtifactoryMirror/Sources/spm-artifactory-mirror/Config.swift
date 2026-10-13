@@ -69,8 +69,8 @@ struct Config: Sendable {
           --artifactory <url>      Artifactory base URL                     [ART_BASE]
                                    default: \(defaultArtifactoryBase)
           --github-remote <key>    Artifactory remote that proxies github.com [GITHUB_REMOTE] default: github
-          --virtual <key>          Swift virtual repo to resolve against    [SWIFT_VIRTUAL] default: omni-swift
-          --local <key>            Swift local repo to publish to           [SWIFT_LOCAL]   default: omni-swift-local
+          --virtual <key>          Swift virtual repo to resolve against    [SWIFT_VIRTUAL] default: omni-virtual
+          --local <key>            Swift local repo to publish to           [SWIFT_LOCAL]   default: omni-swift
           --max-rounds <n>         Resolve attempts before giving up        [MAX_ROUNDS]    default: 5
           --archive-url <template> Source zip URL                           [ARCHIVE_URL]
                                    default: \(defaultArchiveTemplate)
@@ -88,8 +88,8 @@ struct Config: Sendable {
         var githubRemote = env["GITHUB_REMOTE"] ?? "github"
         var archiveTemplate = env["ARCHIVE_URL"] ?? defaultArchiveTemplate
         var tagsTemplate = env["TAGS_URL"] ?? defaultTagsTemplate
-        var virtual = env["SWIFT_VIRTUAL"] ?? "omni-swift"
-        var local = env["SWIFT_LOCAL"] ?? "omni-swift-local"
+        var virtual = env["SWIFT_VIRTUAL"] ?? "omni-virtual"
+        var local = env["SWIFT_LOCAL"] ?? "omni-swift"
         var maxRounds = env["MAX_ROUNDS"] ?? "5"
         var listOnly = false
         var promptForLogin = false
