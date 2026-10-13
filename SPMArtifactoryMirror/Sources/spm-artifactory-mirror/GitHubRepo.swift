@@ -1,18 +1,29 @@
 import Foundation
 
-struct GitHubRepo: Hashable, Comparable, Sendable {
+struct GitHubRepo: Hashable, Comparable, Sendable, CustomStringConvertible {
     let owner: String
     let repo: String
 
     init(owner: String, repo: String) {
         var repo = repo
-        while repo.hasSuffix(".") { repo.removeLast() }
+        while repo.hasSuffix(".") || repo.hasSuffix("/") { repo.removeLast() }
         if repo.hasSuffix(".git") { repo.removeLast(4) }
         self.owner = owner
         self.repo = repo
     }
 
+    /// Parses https, ssh and scp-style GitHub URLs. Returns nil for other hosts.
+    init?(urlString: String) {
+        let pattern = #/(?:https?://|ssh://git@|git@)(?:www\.)?github\.com[/:]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?/#
+        guard let match = urlString.wholeMatch(of: pattern) else { return nil }
+        self.init(owner: String(match.output.1), repo: String(match.output.2))
+    }
+
     var url: String { "https://github.com/\(owner)/\(repo)" }
+    var description: String { "\(owner)/\(repo)" }
+
+    /// GitHub names are case-insensitive, so two spellings are one package.
+    var key: String { description.lowercased() }
 
     /// Registry identities allow [A-Za-z0-9-] in the scope and [A-Za-z0-9_-] in the name.
     var scope: String { Self.sanitize(owner, keeping: "-", replacement: "-") }
@@ -35,7 +46,7 @@ struct GitHubRepo: Hashable, Comparable, Sendable {
         return try encoder.encode(metadata)
     }
 
-    /// GitHub repositories SwiftPM fell back to fetching with git.
+    /// GitHub repositories mentioned in SwiftPM output, such as failed git fetches.
     static func extract(fromLog log: String) -> Set<GitHubRepo> {
         let https = #/https://github\.com/([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+)/#
         let ssh = #/git@github\.com:([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+)/#
@@ -51,7 +62,7 @@ struct GitHubRepo: Hashable, Comparable, Sendable {
     }
 
     static func < (lhs: GitHubRepo, rhs: GitHubRepo) -> Bool {
-        (lhs.owner.lowercased(), lhs.repo.lowercased()) < (rhs.owner.lowercased(), rhs.repo.lowercased())
+        lhs.key < rhs.key
     }
 
     private static func sanitize(_ text: String, keeping allowed: String, replacement: Character) -> String {
@@ -59,5 +70,22 @@ struct GitHubRepo: Hashable, Comparable, Sendable {
             let isAlphanumeric = character.isASCII && (character.isLetter || character.isNumber)
             return isAlphanumeric || allowed.contains(character) ? character : replacement
         })
+    }
+}
+
+enum TagsFeed {
+    /// Tag names from a GitHub tags.atom feed, newest first. GitHub lists
+    /// only the 10 most recent tags.
+    static func tags(fromAtom xml: String) -> [String] {
+        let link = #/releases/tag/([^"<>\s]+)"/#
+        var tags: [String] = []
+        for match in xml.matches(of: link) {
+            let raw = String(match.output.1).replacingOccurrences(of: "&amp;", with: "&")
+            let tag = raw.removingPercentEncoding ?? raw
+            if !tags.contains(tag) {
+                tags.append(tag)
+            }
+        }
+        return tags
     }
 }

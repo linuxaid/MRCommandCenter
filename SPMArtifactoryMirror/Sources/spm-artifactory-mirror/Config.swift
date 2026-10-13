@@ -6,50 +6,90 @@ struct MirrorError: Error, CustomStringConvertible {
 }
 
 struct Config: Sendable {
-    static let defaultArtifactoryBase = "https://artifactory-uat.us.bank-dns.com/artifactory"
+    static let defaultArtifactoryBase = "https://artifactory.us.bank-dns.com/artifactory"
+    static let defaultArchiveTemplate = "{artifactory}/{remote}/{owner}/{repo}/archive/refs/tags/{tag}.zip"
+    static let defaultTagsTemplate = "{artifactory}/{remote}/{owner}/{repo}/tags.atom"
 
     var artifactoryBase: URL
+    var githubRemote: String
+    var archiveTemplate: String
+    var tagsTemplate: String
     var swiftVirtual: String
     var swiftLocal: String
-    var vcsRemote: String
-    var maxVersions: Int
-    var includePrereleases: Bool
     var maxRounds: Int
+    var listOnly: Bool
+    var verbosity: Logger.Level
     var packageDirectory: URL
 
     var virtualRegistryURL: URL { artifactoryBase.appending(path: "api/swift/\(swiftVirtual)") }
     var localRegistryURL: URL { artifactoryBase.appending(path: "api/swift/\(swiftLocal)") }
 
+    func archiveURL(for repo: GitHubRepo, tag: String) throws -> URL {
+        try fill(archiveTemplate, repo: repo, tag: tag)
+    }
+
+    func tagsFeedURL(for repo: GitHubRepo) throws -> URL {
+        try fill(tagsTemplate, repo: repo, tag: nil)
+    }
+
+    private func fill(_ template: String, repo: GitHubRepo, tag: String?) throws -> URL {
+        func encoded(_ text: String) -> String {
+            text.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? text
+        }
+        var base = artifactoryBase.absoluteString
+        while base.hasSuffix("/") { base.removeLast() }
+
+        var text = template
+            .replacingOccurrences(of: "{artifactory}", with: base)
+            .replacingOccurrences(of: "{remote}", with: githubRemote)
+            .replacingOccurrences(of: "{owner}", with: encoded(repo.owner))
+            .replacingOccurrences(of: "{repo}", with: encoded(repo.repo))
+        if let tag {
+            text = text.replacingOccurrences(of: "{tag}", with: encoded(tag))
+        }
+        guard let url = URL(string: text) else { throw MirrorError("invalid URL: \(text)") }
+        return url
+    }
+
     static let usage = """
         Usage: spm-artifactory-mirror [options] <package-directory>
 
-        Publishes every GitHub-hosted dependency of a Swift package (direct and
-        transitive) into an Artifactory Swift local repository, fetching from
-        GitHub only through an Artifactory VCS remote repository. Repeats
-        `swift package resolve --replace-scm-with-registry` until it succeeds.
+        Walks a Swift package's dependency tree by reading each Package.swift, downloads
+        every GitHub-hosted dependency through an Artifactory remote that proxies
+        github.com, and publishes it to an Artifactory Swift local repository. Finishes
+        by checking that `swift package resolve --replace-scm-with-registry` succeeds.
 
         Options (environment variable in brackets):
-          --artifactory <url>      Artifactory base URL            [ART_BASE]
+          --list-only              Print the dependency tree; publish nothing, change nothing
+          -v, --verbose            Show every download, command and decision
+          -vvv, --debug            Also show full command output and run SwiftPM with -vvv
+
+          --artifactory <url>      Artifactory base URL                     [ART_BASE]
                                    default: \(defaultArtifactoryBase)
-          --virtual <key>          Swift virtual repo to resolve   [SWIFT_VIRTUAL]  default: omni-swift
-          --local <key>            Swift local repo to publish to  [SWIFT_LOCAL]    default: omni-swift-local
-          --vcs-remote <key>       VCS remote repo for GitHub      [VCS_REMOTE]     default: omni-github-vcs
-          --max-versions <n>       Newest n versions per package, 0 = all [MAX_VERSIONS] default: 0
-          --include-prereleases    Also publish prerelease tags    [INCLUDE_PRERELEASES=1]
-          --max-rounds <n>         Give up after n resolve rounds  [MAX_ROUNDS]     default: 15
+          --github-remote <key>    Artifactory remote that proxies github.com [GITHUB_REMOTE] default: github
+          --virtual <key>          Swift virtual repo to resolve against    [SWIFT_VIRTUAL] default: omni-swift
+          --local <key>            Swift local repo to publish to           [SWIFT_LOCAL]   default: omni-swift-local
+          --max-rounds <n>         Resolve attempts before giving up        [MAX_ROUNDS]    default: 5
+          --archive-url <template> Source zip URL                           [ARCHIVE_URL]
+                                   default: \(defaultArchiveTemplate)
+          --tags-url <template>    Tag feed URL                             [TAGS_URL]
+                                   default: \(defaultTagsTemplate)
           -h, --help               Show this help
 
+        Templates can use {artifactory}, {remote}, {owner}, {repo} and {tag}.
         Credentials come from ART_USER and ART_TOKEN, or you are prompted.
         """
 
     static func parse(_ arguments: [String], environment env: [String: String]) throws -> Config {
         var base = env["ART_BASE"] ?? defaultArtifactoryBase
+        var githubRemote = env["GITHUB_REMOTE"] ?? "github"
+        var archiveTemplate = env["ARCHIVE_URL"] ?? defaultArchiveTemplate
+        var tagsTemplate = env["TAGS_URL"] ?? defaultTagsTemplate
         var virtual = env["SWIFT_VIRTUAL"] ?? "omni-swift"
         var local = env["SWIFT_LOCAL"] ?? "omni-swift-local"
-        var vcs = env["VCS_REMOTE"] ?? "omni-github-vcs"
-        var maxVersions = env["MAX_VERSIONS"] ?? "0"
-        var includePrereleases = env["INCLUDE_PRERELEASES"] == "1"
-        var maxRounds = env["MAX_ROUNDS"] ?? "15"
+        var maxRounds = env["MAX_ROUNDS"] ?? "5"
+        var listOnly = false
+        var verbosity = Logger.Level.normal
         var packagePath: String?
 
         var remaining = arguments[...]
@@ -60,12 +100,15 @@ struct Config: Sendable {
 
         while let argument = remaining.popFirst() {
             switch argument {
+            case "--list-only": listOnly = true
+            case "-v", "--verbose": verbosity = max(verbosity, .verbose)
+            case "-vv", "-vvv", "--debug": verbosity = .debug
             case "--artifactory": base = try value(for: argument)
+            case "--github-remote": githubRemote = try value(for: argument)
+            case "--archive-url": archiveTemplate = try value(for: argument)
+            case "--tags-url": tagsTemplate = try value(for: argument)
             case "--virtual": virtual = try value(for: argument)
             case "--local": local = try value(for: argument)
-            case "--vcs-remote": vcs = try value(for: argument)
-            case "--max-versions": maxVersions = try value(for: argument)
-            case "--include-prereleases": includePrereleases = true
             case "--max-rounds": maxRounds = try value(for: argument)
             case _ where argument.hasPrefix("-"):
                 throw MirrorError("unknown option \(argument)\n\n\(usage)")
@@ -83,8 +126,8 @@ struct Config: Sendable {
         guard let artifactoryBase = URL(string: base), artifactoryBase.host() != nil else {
             throw MirrorError("invalid Artifactory URL: \(base)")
         }
-        guard let maxVersionCount = Int(maxVersions), maxVersionCount >= 0 else {
-            throw MirrorError("--max-versions must be 0 or more")
+        guard archiveTemplate.contains("{tag}") else {
+            throw MirrorError("--archive-url must contain {tag}")
         }
         guard let maxRoundCount = Int(maxRounds), maxRoundCount >= 1 else {
             throw MirrorError("--max-rounds must be 1 or more")
@@ -92,12 +135,14 @@ struct Config: Sendable {
 
         return Config(
             artifactoryBase: artifactoryBase,
+            githubRemote: githubRemote,
+            archiveTemplate: archiveTemplate,
+            tagsTemplate: tagsTemplate,
             swiftVirtual: virtual,
             swiftLocal: local,
-            vcsRemote: vcs,
-            maxVersions: maxVersionCount,
-            includePrereleases: includePrereleases,
             maxRounds: maxRoundCount,
+            listOnly: listOnly,
+            verbosity: verbosity,
             packageDirectory: packageDirectory
         )
     }
