@@ -1,0 +1,98 @@
+{
+  "name": "mr-command-center-bridge",
+  "displayName": "MR Command Center Bridge",
+  "description": "Lets MR Command Center send review prompts to your GitHub Copilot models through a token-protected localhost API.",
+  "version": "0.1.0",
+  "publisher": "weinnotes",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mrCommandCenterBridge.showStatus",
+        "title": "Show Status",
+        "category": "MR Command Center Bridge"
+      },
+      {
+        "command": "mrCommandCenterBridge.testCopilotAccess",
+        "title": "Test Copilot Access",
+        "category": "MR Command Center Bridge"
+      },
+      {
+        "command": "mrCommandCenterBridge.copyToken",
+        "title": "Copy Access Token",
+        "category": "MR Command Center Bridge"
+      },
+      {
+        "command": "mrCommandCenterBridge.regenerateToken",
+        "title": "Regenerate Access Token",
+        "category": "MR Command Center Bridge"
+      },
+      {
+        "command": "mrCommandCenterBridge.restart",
+        "title": "Restart Server",
+        "category": "MR Command Center Bridge"
+      }
+    ],
+    "configuration": {
+      "title": "MR Command Center Bridge",
+      "properties": {
+        "mrCommandCenterBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the localhost server that MR Command Center talks to."
+        },
+        "mrCommandCenterBridge.port": {
+          "type": "integer",
+          "default": 52741,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Port on 127.0.0.1. MR Command Center must use the same port."
+        },
+        "mrCommandCenterBridge.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Copilot model id or family used when a request doesn't name one (for example gpt-4.1 or claude-sonnet-4). Empty uses the first available model. Run \"Show Status\" to list them."
+        },
+        "mrCommandCenterBridge.maxConcurrentRequests": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Requests sent to Copilot at the same time. Extra requests wait in line."
+        },
+        "mrCommandCenterBridge.requestTimeoutSeconds": {
+          "type": "integer",
+          "default": 180,
+          "minimum": 10,
+          "maximum": 900,
+          "description": "Seconds a request may take, including time waiting in line."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "npm run compile && node --test --test-timeout=10000 out/test/*.test.js",
+    "package": "npm run compile && vsce package --skip-license --allow-missing-repository",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/vscode": "~1.95.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.6.0"
+  }
+}
