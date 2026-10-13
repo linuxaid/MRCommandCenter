@@ -37,7 +37,8 @@ Mirror everything and check that it resolves:
 
 Add `-v` to see every download, command and decision, or `-vvv` to also see
 full command output and run SwiftPM with `-vvv`. Run with `--help` for all
-options. Credentials come from `ART_USER` and `ART_TOKEN`, or you are prompted.
+options. It runs anonymously by default. To log in, set `ART_USER` and `ART_TOKEN`,
+or pass `--login` to be prompted.
 
 ## How it works
 

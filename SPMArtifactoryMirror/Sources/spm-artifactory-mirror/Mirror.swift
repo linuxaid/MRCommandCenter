@@ -24,7 +24,8 @@ actor Mirror {
     let client: ArtifactoryClient
     let shell: Shell
     let logger: Logger
-    let netrc: URL
+    /// nil when running without credentials.
+    let netrc: URL?
     let workDirectory: URL
 
     private var queue: [Pending] = []
@@ -42,7 +43,7 @@ actor Mirror {
     private var otherHosts: [String] = []
     private var problems: [String] = []
 
-    init(config: Config, client: ArtifactoryClient, shell: Shell, logger: Logger, netrc: URL, workDirectory: URL) {
+    init(config: Config, client: ArtifactoryClient, shell: Shell, logger: Logger, netrc: URL?, workDirectory: URL) {
         self.config = config
         self.client = client
         self.shell = shell
@@ -54,6 +55,7 @@ actor Mirror {
     private var rootName: String { config.packageDirectory.lastPathComponent }
     private var packagePath: String { config.packageDirectory.path }
     private var swiftVerbosity: [String] { logger.isDebug ? ["-vvv"] : [] }
+    private var netrcArguments: [String] { netrc.map { ["--netrc-file", $0.path] } ?? [] }
 
     func run() async throws {
         logger.step("Package: \(packagePath)")
@@ -349,10 +351,13 @@ actor Mirror {
             "--package-path", packageRoot.path,
             "--metadata-path", metadata.path,
             "--scratch-directory", directory.appending(path: "scratch").path,
-            "--netrc-file", netrc.path,
-        ] + swiftVerbosity)
+        ] + netrcArguments + swiftVerbosity)
         guard result.succeeded else {
-            throw MirrorError("publish failed:\n\(indent(result.combinedOutput))")
+            var message = "publish failed:\n\(indent(result.combinedOutput))"
+            if netrc == nil && result.combinedOutput.contains("401") {
+                message += "\n      Artifactory wants a login to publish: set ART_USER and ART_TOKEN, or run with --login."
+            }
+            throw MirrorError(message)
         }
         published.append(label)
         logger.info("published")
@@ -397,8 +402,7 @@ actor Mirror {
                 "swift", "package", "resolve",
                 "--package-path", packagePath,
                 "--replace-scm-with-registry",
-                "--netrc-file", netrc.path,
-            ] + swiftVerbosity)
+            ] + netrcArguments + swiftVerbosity)
 
             if result.succeeded {
                 logger.info("resolved in \(formatSeconds(since: start))")

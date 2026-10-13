@@ -25,7 +25,12 @@ struct MirrorCommand {
         for tool in ["swift", "unzip"] {
             guard try shell.run(["which", tool]).succeeded else { throw MirrorError("\(tool) not found") }
         }
-        let credentials = try Credentials.load(environment: environment)
+        // Anonymous unless credentials are provided: Artifactory rejects
+        // requests carrying credentials it doesn't accept.
+        let credentials = config.promptForLogin
+            ? try Credentials.load(environment: environment)
+            : Credentials.fromEnvironment(environment)
+        logger.verbose(credentials.map { "credentials: user \($0.user)" } ?? "credentials: none, running anonymously")
 
         let fileManager = FileManager.default
         let workDirectory = fileManager.temporaryDirectory.appending(path: "spm-mirror-\(UUID().uuidString)")
@@ -33,8 +38,12 @@ struct MirrorCommand {
         defer { try? fileManager.removeItem(at: workDirectory) }
         logger.verbose("working directory: \(workDirectory.path)")
 
-        let netrc = workDirectory.appending(path: "netrc")
-        try credentials.writeNetrc(to: netrc, host: config.artifactoryBase.host() ?? "")
+        var netrc: URL?
+        if let credentials {
+            let file = workDirectory.appending(path: "netrc")
+            try credentials.writeNetrc(to: file, host: config.artifactoryBase.host() ?? "")
+            netrc = file
+        }
 
         let mirror = Mirror(
             config: config,

@@ -8,6 +8,14 @@ struct Credentials: Sendable {
         "Basic " + Data("\(user):\(token)".utf8).base64EncodedString()
     }
 
+    /// Credentials from ART_USER and ART_TOKEN, without prompting.
+    static func fromEnvironment(_ environment: [String: String]) -> Credentials? {
+        guard let user = environment["ART_USER"], !user.isEmpty,
+              let token = environment["ART_TOKEN"], !token.isEmpty
+        else { return nil }
+        return Credentials(user: user, token: token)
+    }
+
     static func load(environment: [String: String]) throws -> Credentials {
         var user = environment["ART_USER"] ?? ""
         if user.isEmpty {

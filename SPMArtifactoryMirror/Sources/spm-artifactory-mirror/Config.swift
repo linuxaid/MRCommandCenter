@@ -18,6 +18,7 @@ struct Config: Sendable {
     var swiftLocal: String
     var maxRounds: Int
     var listOnly: Bool
+    var promptForLogin: Bool
     var verbosity: Logger.Level
     var packageDirectory: URL
 
@@ -63,6 +64,7 @@ struct Config: Sendable {
           --list-only              Print the dependency tree; publish nothing, change nothing
           -v, --verbose            Show every download, command and decision
           -vvv, --debug            Also show full command output and run SwiftPM with -vvv
+          --login                  Prompt for an Artifactory username and token
 
           --artifactory <url>      Artifactory base URL                     [ART_BASE]
                                    default: \(defaultArtifactoryBase)
@@ -77,7 +79,8 @@ struct Config: Sendable {
           -h, --help               Show this help
 
         Templates can use {artifactory}, {remote}, {owner}, {repo} and {tag}.
-        Credentials come from ART_USER and ART_TOKEN, or you are prompted.
+        Runs anonymously by default. To log in to Artifactory, set ART_USER and
+        ART_TOKEN, or pass --login to be prompted.
         """
 
     static func parse(_ arguments: [String], environment env: [String: String]) throws -> Config {
@@ -89,6 +92,7 @@ struct Config: Sendable {
         var local = env["SWIFT_LOCAL"] ?? "omni-swift-local"
         var maxRounds = env["MAX_ROUNDS"] ?? "5"
         var listOnly = false
+        var promptForLogin = false
         var verbosity = Logger.Level.normal
         var packagePath: String?
 
@@ -101,6 +105,7 @@ struct Config: Sendable {
         while let argument = remaining.popFirst() {
             switch argument {
             case "--list-only": listOnly = true
+            case "--login": promptForLogin = true
             case "-v", "--verbose": verbosity = max(verbosity, .verbose)
             case "-vv", "-vvv", "--debug": verbosity = .debug
             case "--artifactory": base = try value(for: argument)
@@ -142,6 +147,7 @@ struct Config: Sendable {
             swiftLocal: local,
             maxRounds: maxRoundCount,
             listOnly: listOnly,
+            promptForLogin: promptForLogin,
             verbosity: verbosity,
             packageDirectory: packageDirectory
         )
