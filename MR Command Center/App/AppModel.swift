@@ -16,6 +16,7 @@ final class AppModel {
     let evaluation: EvalService
     let jira: JiraService
     let commandCenter: CommandCenter
+    let activityKeeper: ActivityKeeper
 
     private(set) var hasGitLabToken = false
     private(set) var hasJiraToken = false
@@ -41,6 +42,7 @@ final class AppModel {
         evaluation = EvalService(container: modelContainer, dependencies: dependencies, diffs: diffs,
                                  staticChecks: staticChecks, aiReview: aiReview)
         commandCenter = CommandCenter(container: modelContainer, dependencies: dependencies, store: mergeRequests)
+        activityKeeper = ActivityKeeper(container: modelContainer)
         refreshTokenState()
     }
 
@@ -65,6 +67,28 @@ final class AppModel {
     func refreshIfStale(olderThan interval: TimeInterval) async {
         if let last = mergeRequests.lastRefreshedAt, Date.now.timeIntervalSince(last) < interval { return }
         await refresh(.automatic)
+    }
+
+    var pollInterval: TimeInterval {
+        TimeInterval(max(1, AccountSettings.current(in: modelContainer.mainContext).pollIntervalMinutes) * 60)
+    }
+
+    private var pollTask: Task<Void, Never>?
+
+    /// Refreshes whenever the data is older than the poll interval, for as long as the app runs,
+    /// window open or not, so the menu bar count and merge rules stay current. Checks twice a
+    /// minute so interval changes and finishing onboarding take effect quickly.
+    func startPolling() {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let self, !self.needsOnboarding {
+                    // A little slack so a check landing just short of the interval doesn't wait another round.
+                    await self.refreshIfStale(olderThan: self.pollInterval - 15)
+                }
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
     }
 
     func showInDiff(mr: TrackedMR, path: String, line: Int) {

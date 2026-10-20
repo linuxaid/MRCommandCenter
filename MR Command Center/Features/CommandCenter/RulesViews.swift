@@ -57,7 +57,7 @@ private struct MasterSwitch: View {
                     .font(.headline)
                     .foregroundStyle(Theme.ink)
                 Text(isOn
-                     ? "Rules merge through the GitLab API as soon as an MR is ready, pinned to the exact commit they checked. The app keeps refreshing in the background while this is on, as long as it's running."
+                     ? "Rules merge through the GitLab API as soon as an MR is ready, pinned to the exact commit they checked. The app keeps checking in the background, as long as it's running."
                      : "Rules only report what they would merge, in Activity. Nothing is merged. Turn this on when the rules look right.")
                     .font(.callout)
                     .foregroundStyle(Theme.inkSecondary)

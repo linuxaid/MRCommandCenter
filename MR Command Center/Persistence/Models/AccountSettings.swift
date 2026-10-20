@@ -28,6 +28,8 @@ final class AccountSettings {
 
     // Refresh and checks
     var pollIntervalMinutes: Int = 5
+    /// See `ActivityKeeper`.
+    var keepMacActive: Bool = false
     var diffSizeLimitLines: Int = 1000
     var collapseFileDiffThresholdLines: Int = 400
     var debugPatterns: [String] = AccountSettings.defaultDebugPatterns

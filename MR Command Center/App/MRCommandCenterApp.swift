@@ -4,6 +4,7 @@ import os
 
 @main
 struct MRCommandCenterApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var appModel: AppModel
 
     init() {
@@ -33,6 +34,10 @@ struct MRCommandCenterApp: App {
 
         let model = AppModel(dependencies: useMocks ? .mock() : .live(), modelContainer: container)
         model.storageWarning = storageWarning
+        if !LaunchMode.isRunningTests {
+            model.startPolling()
+            model.activityKeeper.start()
+        }
         _appModel = State(initialValue: model)
     }
 
@@ -61,5 +66,20 @@ struct MRCommandCenterApp: App {
         }
         .modelContainer(appModel.modelContainer)
         .environment(appModel)
+
+        MenuBarExtra {
+            MenuBarPanel()
+                .environment(appModel)
+                .modelContainer(appModel.modelContainer)
+                .preferredColorScheme(.light)
+        } label: {
+            MenuBarLabel(center: appModel.commandCenter)
+        }
+        .menuBarExtraStyle(.window)
     }
+}
+
+/// Keeps the app (and its refreshing and menu bar icon) running after the window is closed.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }

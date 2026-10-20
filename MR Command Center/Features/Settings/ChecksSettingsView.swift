@@ -13,15 +13,23 @@ struct GeneralSettingsView: View {
 
 private struct GeneralForm: View {
     @Bindable var settings: AccountSettings
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
+        @Bindable var keeper = appModel.activityKeeper
+
         Form {
+            Section {
+                Toggle("Keep this Mac awake while the app is open", isOn: $keeper.isEnabled)
+            } footer: {
+                Text("Keeps the display on and stops the screen from locking when idle. It doesn't count as keyboard or mouse use, so apps that track idle time can still show you as away. Pauses while the lid is closed or the screen is locked.")
+            }
             Section {
                 Stepper(value: $settings.pollIntervalMinutes, in: 1...60) {
                     LabeledContent("Refresh every", value: "\(settings.pollIntervalMinutes) min")
                 }
             } footer: {
-                Text("Automatic refresh runs while the app is active, and in the background when merge rules are switched on. ⌘R refreshes at any time.")
+                Text("Refreshes automatically while the app is running, even with its window closed, so the menu bar count stays current. ⌘R refreshes at any time.")
             }
             Section {
                 Stepper(value: $settings.collapseFileDiffThresholdLines, in: 50...5000, step: 50) {

@@ -50,9 +50,6 @@ struct RootView: View {
                 openSettings()
             }
         }
-        .task(id: PollConfiguration(interval: pollInterval, enabled: !appModel.needsOnboarding)) {
-            await poll()
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             guard !appModel.needsOnboarding else { return }
             Task { await appModel.refreshIfStale(olderThan: pollInterval) }
@@ -127,33 +124,11 @@ struct RootView: View {
         }
     }
 
-    /// Refreshes on appear, then every poll interval. In the background it keeps going only
-    /// while live merge rules need to watch for ready MRs.
-    private func poll() async {
-        guard !appModel.needsOnboarding else { return }
-        await appModel.refresh(.automatic)
-        while !Task.isCancelled {
-            do {
-                try await Task.sleep(for: .seconds(pollInterval))
-            } catch {
-                return
-            }
-            let rulesNeedWatching = center.isAutoMergeLive && center.hasEnabledRules
-            if NSApplication.shared.isActive || rulesNeedWatching {
-                await appModel.refresh(.automatic)
-            }
-        }
-    }
 }
 
 extension RootView {
     /// Fixed so the window minimum never depends on content.
     static let detailMinWidth: CGFloat = 320
-}
-
-private struct PollConfiguration: Equatable {
-    let interval: TimeInterval
-    let enabled: Bool
 }
 
 /// Refresh, with the last refresh time underneath.
