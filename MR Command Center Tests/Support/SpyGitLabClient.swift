@@ -14,6 +14,8 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var postFailure: APIError?
         var lastDiscussionRequest: NewDiffDiscussionRequest?
         var lastGeneralBody: String?
+        var mergeFailure: APIError?
+        var merges: [MergeOptions] = []
     }
 
     let state = Mutex(State())
@@ -41,6 +43,24 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         record("list")
         if let failure = state.withLock({ $0.listFailure }) { throw failure }
         return try await mock.openMergeRequests(reviewerID: reviewerID)
+    }
+
+    func openMergeRequests(authorID: Int) async throws -> [GitLabMergeRequest] {
+        record("authoredList")
+        if let failure = state.withLock({ $0.listFailure }) { throw failure }
+        return try await mock.openMergeRequests(authorID: authorID)
+    }
+
+    func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
+        record("merge")
+        if let failure = state.withLock({ $0.mergeFailure }) { throw failure }
+        let client = mock
+        let merged = try await client.merge(projectID: projectID, iid: iid, options: options)
+        edit { state in
+            state.merges.append(options)
+            state.data = client.data
+        }
+        return merged
     }
 
     func mergeRequest(projectID: Int, iid: Int) async throws -> GitLabMergeRequest {

@@ -35,8 +35,6 @@ final class AccountSettings {
     /// Extra path substrings that mark a file as a test (on top of the built-in rules).
     var extraTestPathPatterns: [String] = []
     var lastMergeRequestRefreshAt: Date?
-    /// Draft MRs are hidden from the list unless this is on.
-    var showDraftMergeRequests: Bool = false
 
     // AI review
     var aiConcurrencyLimit: Int = 1
@@ -50,6 +48,8 @@ final class AccountSettings {
 
     // Write actions and notifications
     var postCommentsEnabled: Bool = false
+    /// The master switch for merge rules. Off: rules run as a dry run and only report what they'd merge.
+    var autoMergeEnabled: Bool = false
     var notifyNewReviewRequests: Bool = false
     var notifyPipelineFailures: Bool = false
 

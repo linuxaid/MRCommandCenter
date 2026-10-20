@@ -1,8 +1,8 @@
 import Foundation
 import SwiftData
 
-/// A merge request seen in the reviewer list, with cached status fields.
-/// Rows are kept (hidden) after the MR leaves the list so AI runs and eval cases survive.
+/// An open merge request you review or authored, with cached status fields.
+/// Rows are kept (hidden) after the MR leaves the lists so AI runs and eval cases survive.
 @Model
 final class TrackedMR {
     @Attribute(.unique) var key: String
@@ -44,7 +44,30 @@ final class TrackedMR {
 
     var jiraKey: String?
 
+    /// Still open and in your reviewer or author list.
     var isInReviewerList: Bool = true
+    /// You're a reviewer on it.
+    var isReviewer: Bool = true
+    /// You opened it.
+    var isAuthor: Bool = false
+    var approvedByUsernames: [String] = []
+    /// GitLab's own "merge when pipeline succeeds" is set.
+    var mergeWhenPipelineSucceeds: Bool = false
+    /// Unresolved threads where someone else spoke last and you're involved
+    /// (you commented in it, or it's your MR).
+    var threadsAwaitingMe: Int = 0
+    /// Who spoke last in the most recent thread waiting on you.
+    var lastReplyFrom: String?
+    /// Unresolved threads where you spoke last.
+    var threadsAwaitingOthers: Int = 0
+    /// When the head commit last changed (new pushes), for merge rules' quiet period.
+    var headChangedAt: Date?
+    /// The last time something happened to it (see `ActivityEvent`), and the last time you looked.
+    var lastActivityAt: Date?
+    var seenAt: Date?
+    /// Merge rules: the head SHA last acted on (merged, attempted, or reported in dry run), and the last failure.
+    var autoMergeHandledSHA: String?
+    var autoMergeError: String?
     var firstSeenAt: Date
     var lastRefreshedAt: Date?
     /// Set when the most recent detail fetch for this MR failed.
@@ -143,6 +166,10 @@ extension TrackedMR {
         labelStylesData.flatMap { try? JSONDecoder().decode([String: LabelStyle].self, from: $0) } ?? [:]
     }
     var approvalsMet: Bool { approvalsGiven >= approvalsRequired }
+    var hasUnseenActivity: Bool {
+        guard let lastActivityAt else { return false }
+        return lastActivityAt > (seenAt ?? .distantPast)
+    }
     var shortSHA: String { String(headSHA.prefix(8)) }
 
     var diffRefs: DiffRefs? {
@@ -168,7 +195,12 @@ extension TrackedMR {
         if hasConflicts != conflicts { hasConflicts = conflicts }
         if detailedMergeStatus != item.detailedMergeStatus { detailedMergeStatus = item.detailedMergeStatus }
         if lastSeenUpdatedAt != item.updatedAt { lastSeenUpdatedAt = item.updatedAt }
-        if let sha = item.sha, headSHA != sha { headSHA = sha }
+        if let sha = item.sha, headSHA != sha {
+            headSHA = sha
+            headChangedAt = .now
+        }
+        let autoMerge = item.mergeWhenPipelineSucceeds ?? false
+        if mergeWhenPipelineSucceeds != autoMerge { mergeWhenPipelineSucceeds = autoMerge }
         if !isInReviewerList { isInReviewerList = true }
     }
 
@@ -183,11 +215,16 @@ extension TrackedMR {
         approvalsGiven = approvals.given
         approvalsRequired = approvals.required
         approvedBy = approvals.approvedBy?.map(\.user.name) ?? []
+        approvedByUsernames = approvals.approverUsernames
     }
 
-    func apply(discussions: [GitLabDiscussion]) {
+    func apply(discussions: [GitLabDiscussion], me: String?) {
         unresolvedDiscussions = discussions.count(where: \.isUnresolved)
         resolvableDiscussions = discussions.count(where: \.isResolvable)
+        let turns = ThreadTurns(discussions: discussions, me: me, isMyMR: isAuthor)
+        threadsAwaitingMe = turns.awaitingMe
+        threadsAwaitingOthers = turns.awaitingOthers
+        lastReplyFrom = turns.lastReplyFrom
     }
 }
 
@@ -195,4 +232,32 @@ extension TrackedMR {
 nonisolated struct LabelStyle: Codable, Sendable, Equatable {
     var color: String
     var textColor: String?
+}
+
+/// Whose turn it is in each unresolved thread, from your point of view.
+nonisolated struct ThreadTurns: Equatable {
+    var awaitingMe = 0
+    var awaitingOthers = 0
+    var lastReplyFrom: String?
+
+    init(discussions: [GitLabDiscussion], me: String?, isMyMR: Bool) {
+        guard let me else { return }
+        var latestReply: Date?
+        for thread in discussions where thread.isUnresolved {
+            let notes = thread.userNotes
+            guard let last = notes.last, let lastAuthor = last.author else { continue }
+            if lastAuthor.username == me {
+                awaitingOthers += 1
+                continue
+            }
+            let involved = isMyMR || notes.contains { $0.author?.username == me }
+            guard involved else { continue }
+            awaitingMe += 1
+            let date = last.createdAt ?? .distantPast
+            if latestReply.map({ date >= $0 }) ?? true {
+                latestReply = date
+                lastReplyFrom = lastAuthor.name
+            }
+        }
+    }
 }

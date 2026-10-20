@@ -126,7 +126,7 @@ struct JiraServiceTests {
     }
 
     private func mr(_ app: AppModel, _ iid: Int) throws -> TrackedMR {
-        try #require(app.mergeRequests.reviewerMergeRequests.first { $0.iid == iid })
+        try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == iid })
     }
 
     @Test func refreshFillsIssueStateOnMRs() async throws {
@@ -230,7 +230,7 @@ struct StoryInReviewTests {
         let model = FakeReviewModel()
         let app = AppModel.testing(model: model, jira: SpyJiraClient())
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.reviewerMergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         app.aiReview.start(mr)
         await app.aiReview.wait(for: mr.key)
 
@@ -250,18 +250,18 @@ struct StoryInReviewTests {
         let model = FakeReviewModel()
         let app = AppModel.testing(model: model, jira: SpyJiraClient())
         await app.refresh(.automatic)
-        let pay150 = try #require(app.mergeRequests.reviewerMergeRequests.first { $0.iid == 415 })
+        let pay150 = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 415 })
         #expect(PromptBuilder.contextBlock(app.aiReview.storyContext(for: pay150)).contains("none listed, so judge meetsCriteria against the story description"))
-        let shop95 = try #require(app.mergeRequests.reviewerMergeRequests.first { $0.iid == 1884 })
+        let shop95 = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1884 })
         #expect(PromptBuilder.contextBlock(app.aiReview.storyContext(for: shop95)).contains("the Jira issue wasn't found"))
-        let noKey = try #require(app.mergeRequests.reviewerMergeRequests.first { $0.iid == 77 })
+        let noKey = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 77 })
         #expect(PromptBuilder.contextBlock(app.aiReview.storyContext(for: noKey)).contains("no Jira key in the branch name"))
     }
 
     @Test func evalCasesSnapshotTheStory() async throws {
         let app = AppModel.testing(jira: SpyJiraClient())
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.reviewerMergeRequests.first { $0.iid == 80 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 80 })
         let evalCase = try await app.evaluation.saveCase(for: mr, expectedVerdict: .likelyProblem, expectedConcerns: [], notes: "")
         #expect(evalCase.jiraSummary == "Rotate staging database credentials via Vault")
         #expect(evalCase.acceptanceCriteria?.contains("No credentials are stored in Terraform files") == true)

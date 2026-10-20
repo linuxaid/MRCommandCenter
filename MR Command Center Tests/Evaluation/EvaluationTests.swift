@@ -62,7 +62,7 @@ struct EvalServiceTests {
 
     @Test func savingACaseSnapshotsTheDiffAndFlagsAndUpdatesInPlace() async throws {
         let (app, _, _) = await setUp()
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
 
         let evalCase = try await app.evaluation.saveCase(for: mr, expectedVerdict: .likelyProblem,
             expectedConcerns: [ExpectedConcern(path: "app/webhooks/delivery.py", line: 40, description: "429s")], notes: "Good test")
@@ -82,8 +82,8 @@ struct EvalServiceTests {
         model.edit { $0.concernsByPath["app/webhooks/delivery.py"] = [ConcernResult(lineHint: "41", severity: .high, explanation: "429s")] }
         let (app, spy, _) = await setUp(model: model)
         let context = app.modelContainer.mainContext
-        let mr412 = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
-        let mr1880 = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 1880 })
+        let mr412 = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
+        let mr1880 = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1880 })
         try await app.evaluation.saveCase(for: mr412, expectedVerdict: .likelyProblem,
                                           expectedConcerns: [ExpectedConcern(path: "app/webhooks/delivery.py", line: 40, description: "429s")], notes: "")
         try await app.evaluation.saveCase(for: mr1880, expectedVerdict: .looksGood, expectedConcerns: [], notes: "")
@@ -121,7 +121,7 @@ struct EvalServiceTests {
     @Test func batchNeedsTheModel() async throws {
         let app = AppModel.testing(modelStatus: .modelNotReady)
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.mergeRequests.first)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first)
         try await app.evaluation.saveCase(for: mr, expectedVerdict: .looksGood, expectedConcerns: [], notes: "")
         app.evaluation.runBatch(prompt: app.aiReview.activePrompt, cases: app.evaluation.cases)
         #expect(!app.evaluation.isRunning)
@@ -133,7 +133,7 @@ struct EvalServiceTests {
         model.edit { $0.delay = .milliseconds(120) }
         let (app, _, _) = await setUp(model: model)
         for iid in [412, 1880, 420] {
-            let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == iid })
+            let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == iid })
             try await app.evaluation.saveCase(for: mr, expectedVerdict: .looksGood, expectedConcerns: [], notes: "")
         }
         app.evaluation.runBatch(prompt: app.aiReview.activePrompt, cases: app.evaluation.cases)
@@ -152,7 +152,7 @@ struct ExportTests {
         model.edit { $0.concernsByPath["app/webhooks/delivery.py"] = [ConcernResult(lineHint: "42", severity: .low, explanation: "print")] }
         let app = AppModel.testing(model: model)
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         app.aiReview.start(mr)
         await app.aiReview.wait(for: mr.key)
         let run = try #require(app.aiReview.latestRun(for: mr.key))

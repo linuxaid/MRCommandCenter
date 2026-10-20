@@ -37,6 +37,16 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
         ])
     }
 
+    func openMergeRequests(authorID: Int) async throws -> [GitLabMergeRequest] {
+        try await allPages(GitLabMergeRequest.self, path: "/api/v4/merge_requests", query: [
+            URLQueryItem(name: "state", value: "opened"),
+            URLQueryItem(name: "scope", value: "all"),
+            URLQueryItem(name: "author_id", value: String(authorID)),
+            URLQueryItem(name: "order_by", value: "updated_at"),
+            URLQueryItem(name: "with_labels_details", value: "true"),
+        ])
+    }
+
     func mergeRequest(projectID: Int, iid: Int) async throws -> GitLabMergeRequest {
         try await http.get(GitLabMergeRequest.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)", decoder: .gitLab)
     }
@@ -79,6 +89,11 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
         let id = discussionID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? discussionID
         return try await http.post(GitLabDiscussion.Note.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/discussions/\(id)/notes",
                                    body: NewNoteRequest(body: body), decoder: .gitLab)
+    }
+
+    func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
+        try await http.put(GitLabMergeRequest.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/merge",
+                           body: options, decoder: .gitLab)
     }
 
     /// Follows GitLab's offset pagination via the `X-Next-Page` header.

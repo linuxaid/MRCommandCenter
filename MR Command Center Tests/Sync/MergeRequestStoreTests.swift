@@ -10,20 +10,26 @@ struct MergeRequestStoreTests {
 
         let outcome = try #require(await store.refresh(.manual))
 
-        #expect(store.reviewerMergeRequests.count == 8)
+        #expect(store.trackedMergeRequests.count == 11, "8 to review plus 3 you opened")
         #expect(outcome.wasInitialLoad)
-        #expect(outcome.newMergeRequestKeys.count == 8)
-        #expect(outcome.detailFetches == 8)
+        #expect(outcome.newMergeRequestKeys.count == 11)
+        #expect(outcome.detailFetches == 11)
         #expect(spy.count("currentUser") == 1)
+        #expect(spy.count("list") == 1 && spy.count("authoredList") == 1)
         #expect(store.problem == nil)
         #expect(store.lastRefreshedAt != nil)
 
-        let pay142 = try #require(store.mergeRequests.first { $0.iid == 412 })
+        let pay142 = try #require(store.trackedMergeRequests.first { $0.iid == 412 })
         #expect(pay142.jiraKey == "PAY-142")
         #expect(pay142.pipelineStatus == .success)
         #expect(pay142.approvalsGiven == 1 && pay142.approvalsRequired == 2)
-        #expect(pay142.unresolvedDiscussions == 2)
-        #expect(store.mergeRequests.first { $0.iid == 77 }?.jiraKey == nil)
+        #expect(pay142.unresolvedDiscussions == 3)
+        #expect(pay142.threadsAwaitingMe == 1, "Priya answered the mock user's thread")
+        #expect(pay142.lastReplyFrom == "Priya Natarajan")
+        #expect(pay142.isReviewer && !pay142.isAuthor)
+        let mine = try #require(store.trackedMergeRequests.first { $0.iid == 233 })
+        #expect(mine.isAuthor && !mine.isReviewer)
+        #expect(store.trackedMergeRequests.first { $0.iid == 77 }?.jiraKey == nil)
     }
 
     @Test func secondRefreshSkipsUnchangedMRsButRepollsActivePipelines() async throws {
@@ -34,7 +40,7 @@ struct MergeRequestStoreTests {
         let outcome = try #require(await store.refresh(.automatic))
 
         #expect(outcome.detailFetches == 0)
-        #expect(spy.count("detail") == 8)
+        #expect(spy.count("detail") == 11)
         #expect(spy.count("currentUser") == 1, "User ID is cached in settings")
         // Mock data has one running and one pending pipeline.
         #expect(outcome.pipelineFetches == 2)
@@ -62,14 +68,14 @@ struct MergeRequestStoreTests {
         let outcome = try #require(await store.refresh(.automatic))
 
         #expect(outcome.detailFetches == 1)
-        #expect(store.mergeRequests.contains { $0.title == "Renamed title" })
+        #expect(store.trackedMergeRequests.contains { $0.title == "Renamed title" })
     }
 
     @Test func reportsPipelineThatTurnedFailed() async throws {
         let spy = SpyGitLabClient()
         let store = AppModel.testing(gitLab: spy).mergeRequests
         await store.refresh(.automatic)
-        let running = try #require(store.mergeRequests.first { $0.pipelineStatus == .running })
+        let running = try #require(store.trackedMergeRequests.first { $0.pipelineStatus == .running })
         let pipelineID = try #require(running.pipelineID)
 
         spy.edit { $0.pipelineOverrides[pipelineID] = "failed" }
@@ -83,13 +89,13 @@ struct MergeRequestStoreTests {
         let spy = SpyGitLabClient()
         let store = AppModel.testing(gitLab: spy).mergeRequests
         await store.refresh(.automatic)
-        let removedKey = try #require(store.reviewerMergeRequests.last?.key)
+        let removedKey = try #require(store.trackedMergeRequests.last?.key)
 
         spy.edit { $0.data.entries.removeAll { $0.detail.key == removedKey } }
         await store.refresh(.automatic)
 
-        #expect(store.reviewerMergeRequests.count == 7)
-        #expect(!store.reviewerMergeRequests.contains { $0.key == removedKey })
+        #expect(store.trackedMergeRequests.count == 10)
+        #expect(!store.trackedMergeRequests.contains { $0.key == removedKey })
     }
 
     @Test func keepsCachedDataAndFlagsCredentialsOn401() async throws {
@@ -101,7 +107,7 @@ struct MergeRequestStoreTests {
         let outcome = await store.refresh(.manual)
 
         #expect(outcome == nil)
-        #expect(store.reviewerMergeRequests.count == 8)
+        #expect(store.trackedMergeRequests.count == 11)
         guard case .credentials = store.problem else {
             Issue.record("Expected credentials problem, got \(String(describing: store.problem))")
             return
@@ -118,7 +124,7 @@ struct MergeRequestStoreTests {
         await store.refresh(.automatic)
 
         #expect(store.problem == .offline)
-        #expect(store.reviewerMergeRequests.count == 8)
+        #expect(store.trackedMergeRequests.count == 11)
         #expect(store.lastRefreshedAt == lastRefreshed)
 
         spy.edit { $0.listFailure = nil }
@@ -133,35 +139,43 @@ struct MergeRequestStoreTests {
 
         await store.refresh(.automatic)
 
-        #expect(store.reviewerMergeRequests.count == 8)
+        #expect(store.trackedMergeRequests.count == 11)
         #expect(store.problem == nil)
-        #expect(store.mergeRequests.allSatisfy { $0.detailsError != nil && !$0.hasLoadedDetails })
+        #expect(store.trackedMergeRequests.allSatisfy { $0.detailsError != nil && !$0.hasLoadedDetails })
     }
 
-    @Test func draftsAreHiddenUntilTurnedOn() async throws {
-        let app = AppModel.testing(gitLab: SpyGitLabClient())
+    @Test func recordsWhatChangedBetweenRefreshes() async throws {
+        let spy = SpyGitLabClient()
+        let app = AppModel.testing(gitLab: spy)
         let store = app.mergeRequests
         await store.refresh(.automatic)
+        #expect(try app.modelContainer.mainContext.fetchCount(FetchDescriptor<ActivityEvent>()) == 0,
+                "The first load isn't news")
 
-        #expect(store.mergeRequests.count == 7)
-        #expect(!store.mergeRequests.contains { $0.isDraft })
-        #expect(store.hiddenDraftCount == 1)
+        let running = try #require(store.trackedMergeRequests.first { $0.pipelineStatus == .running })
+        let pipelineID = try #require(running.pipelineID)
+        spy.edit { $0.pipelineOverrides[pipelineID] = "success" }
+        await store.refresh(.automatic)
 
-        store.setShowsDrafts(true)
-        #expect(store.mergeRequests.count == 8)
-        #expect(store.hiddenDraftCount == 0)
-        #expect(AccountSettings.current(in: app.modelContainer.mainContext).showDraftMergeRequests, "The choice is saved")
+        let events = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
+        #expect(events.contains { $0.mrKey == running.key && $0.kind == .pipelinePassed })
+        #expect(running.hasUnseenActivity)
+        store.markSeen(running)
+        #expect(!running.hasUnseenActivity)
     }
 
-    @Test func hidingDraftsClearsADraftSelection() async throws {
-        let store = AppModel.testing(gitLab: SpyGitLabClient()).mergeRequests
-        store.setShowsDrafts(true)
+    @Test func reportsMergeRequestsThatLeave() async throws {
+        let spy = SpyGitLabClient()
+        let app = AppModel.testing(gitLab: spy)
+        let store = app.mergeRequests
         await store.refresh(.automatic)
-        store.selectedKey = try #require(store.mergeRequests.first { $0.isDraft }).key
+        let gone = try #require(store.trackedMergeRequests.first { $0.iid == 77 })
 
-        store.setShowsDrafts(false)
+        spy.edit { $0.data.entries.removeAll { $0.detail.iid == 77 } }
+        await store.refresh(.automatic)
 
-        #expect(store.selectedKey == nil)
+        let events = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
+        #expect(events.contains { $0.mrKey == gone.key && $0.kind == .left })
     }
 
     @Test func notConfiguredWithoutToken() async {
@@ -174,12 +188,13 @@ struct MergeRequestStoreTests {
         let store = AppModel.testing().mergeRequests
         await store.refresh(.automatic)
 
-        store.selectNext()
-        #expect(store.selectedKey == store.mergeRequests.first?.key)
-        store.selectNext()
-        #expect(store.selectedKey == store.mergeRequests[1].key)
-        store.selectPrevious()
-        store.selectPrevious()
-        #expect(store.selectedKey == store.mergeRequests.first?.key, "Clamps at the top")
+        let order = store.trackedMergeRequests.map(\.key).reversed().map { $0 }
+        store.moveSelection(by: 1, in: order)
+        #expect(store.selectedKey == order[0])
+        store.moveSelection(by: 1, in: order)
+        #expect(store.selectedKey == order[1])
+        store.moveSelection(by: -1, in: order)
+        store.moveSelection(by: -1, in: order)
+        #expect(store.selectedKey == order[0], "Clamps at the top")
     }
 }

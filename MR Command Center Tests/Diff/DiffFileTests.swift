@@ -79,7 +79,7 @@ struct DiffServiceTests {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
 
         let first = try await model.diffs.diff(for: mr)
         let second = try await model.diffs.diff(for: mr)
@@ -94,7 +94,7 @@ struct DiffServiceTests {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         let oldSHA = mr.headSHA
         _ = try await model.diffs.diff(for: mr)
 
@@ -110,7 +110,7 @@ struct DiffServiceTests {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first)
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first)
         _ = try await model.diffs.diff(for: mr)
         _ = try await model.diffs.diff(for: mr, forceRefresh: true)
         #expect(spy.count("diffs") == 2)
@@ -119,7 +119,7 @@ struct DiffServiceTests {
     @Test func overflowingMockMR() async throws {
         let model = AppModel.testing()
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 1884 })
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 1884 })
         #expect(mr.changesCount == "1000+")
         #expect(try await model.diffs.diff(for: mr).isOverflow)
     }
@@ -128,11 +128,11 @@ struct DiffServiceTests {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first)
-        #expect(spy.count("detail") == 8)
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first)
+        #expect(spy.count("detail") == 11)
 
         await model.mergeRequests.refreshDetails(for: mr)
-        #expect(spy.count("detail") == 9)
-        #expect(spy.count("approvals") == 9)
+        #expect(spy.count("detail") == 12)
+        #expect(spy.count("approvals") == 12)
     }
 }

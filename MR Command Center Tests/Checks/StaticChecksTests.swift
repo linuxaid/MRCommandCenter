@@ -116,8 +116,8 @@ struct StaticCheckServiceTests {
         let model = AppModel.testing(gitLab: spy)
         await model.refresh(.automatic)
 
-        #expect(spy.count("diffs") == 8)
-        let vault = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 80 })
+        #expect(spy.count("diffs") == 11)
+        let vault = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 80 })
         let report = model.staticChecks.report(for: vault)
         #expect(report.diffChecksAvailable)
         #expect(report.result(.secrets)?.outcome == .fail)
@@ -125,42 +125,42 @@ struct StaticCheckServiceTests {
         #expect(MRStatusLine.checksItem(for: vault).tone == .negative)
 
         await model.refresh(.automatic)
-        #expect(spy.count("diffs") == 8, "Unchanged SHAs aren't re-analyzed")
+        #expect(spy.count("diffs") == 11, "Unchanged SHAs aren't re-analyzed")
     }
 
     @Test func newHeadSHAIsReanalyzed() async throws {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first)
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first)
 
         mr.headSHA = String(repeating: "e", count: 40)
         #expect(!model.staticChecks.report(for: mr).diffChecksAvailable)
         #expect(MRStatusLine.checksItem(for: mr).title == "Checking" || MRStatusLine.checksItem(for: mr).tone == .negative)
         await model.staticChecks.evaluate(mr)
         #expect(model.staticChecks.report(for: mr).diffChecksAvailable)
-        #expect(spy.count("diffs") == 9)
+        #expect(spy.count("diffs") == 12)
     }
 
     @Test func changingCheckSettingsInvalidatesTheCache() async throws {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         #expect(model.staticChecks.report(for: mr).result(.debugOutput)?.outcome == .warning)
 
         AccountSettings.current(in: model.modelContainer.mainContext).debugPatterns = ["puts"]
         #expect(!model.staticChecks.report(for: mr).diffChecksAvailable)
         await model.staticChecks.evaluate(mr)
         #expect(model.staticChecks.report(for: mr).result(.debugOutput)?.outcome == .pass)
-        #expect(spy.count("diffs") == 8, "The diff itself is still cached per SHA")
+        #expect(spy.count("diffs") == 11, "The diff itself is still cached per SHA")
     }
 
     @Test func diffFailureLeavesChecksPendingWithReason() async throws {
         let spy = SpyGitLabClient()
         let model = AppModel.testing(gitLab: spy)
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first)
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first)
         spy.edit { $0.data.entries.removeAll { $0.detail.key == mr.key } }
 
         await model.staticChecks.evaluate(mr)
@@ -172,7 +172,7 @@ struct StaticCheckServiceTests {
     @Test func reportExposesFindingsPerFileForTheAIReview() async throws {
         let model = AppModel.testing()
         await model.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         let findings = model.staticChecks.report(for: mr).findings(forPath: "app/webhooks/delivery.py")
         #expect(Set(findings.map(\.kind)) == [.debugOutput, .todo])
     }

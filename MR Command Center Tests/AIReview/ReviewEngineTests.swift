@@ -140,7 +140,7 @@ struct AIReviewServiceTests {
         let model = FakeReviewModel()
         model.edit { $0.concernsByPath["app/webhooks/delivery.py"] = [ConcernResult(lineHint: "42", severity: .high, explanation: "Debug print.")] }
         let (app, _) = await setUp(model: model)
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
 
         await review(app, mr)
 
@@ -166,7 +166,7 @@ struct AIReviewServiceTests {
 
     @Test func doesNotRerunTheSameSHAUnlessAsked() async throws {
         let (app, model) = await setUp()
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 1880 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1880 })
         await review(app, mr)
         let calls = model.fileCalls.count
         #expect(!app.aiReview.needsReview(mr))
@@ -185,7 +185,7 @@ struct AIReviewServiceTests {
 
     @Test func aNewPromptVersionNeedsAFreshReview() async throws {
         let (app, _) = await setUp()
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 1880 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1880 })
         await review(app, mr)
         let context = app.modelContainer.mainContext
         let v2 = PromptVersion(name: "v2", fileInstructions: "Stricter.", mergeInstructions: "Merge.")
@@ -196,7 +196,7 @@ struct AIReviewServiceTests {
 
     @Test func unavailableModelDoesNothing() async throws {
         let (app, model) = await setUp(status: .appleIntelligenceNotEnabled)
-        let mr = try #require(app.mergeRequests.mergeRequests.first)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first)
         app.aiReview.start(mr)
         #expect(!app.aiReview.isRunning(mr.key))
         #expect(model.fileCalls.isEmpty)
@@ -207,7 +207,7 @@ struct AIReviewServiceTests {
         let (app, model) = await setUp()
         let context = app.modelContainer.mainContext
         for skill in try context.fetch(FetchDescriptor<ReviewSkill>()) { skill.isEnabled = false }
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         await review(app, mr)
         #expect(model.fileCalls.allSatisfy { !$0.instructions.contains("###") })
         #expect(app.aiReview.latestRun(for: mr.key)?.skillsUsed.isEmpty == true)

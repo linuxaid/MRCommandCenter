@@ -135,11 +135,9 @@ final class DiscussionService {
     }
 
     /// Keeps the sidebar's unresolved-thread count in step with what's shown.
+    /// Keeps the thread counts and "whose turn" fields current after a fetch or a post.
     private func updateCounts(for mr: TrackedMR, with discussions: [GitLabDiscussion]) {
-        let unresolved = discussions.count(where: \.isUnresolved)
-        let resolvable = discussions.count(where: \.isResolvable)
-        if mr.unresolvedDiscussions != unresolved { mr.unresolvedDiscussions = unresolved }
-        if mr.resolvableDiscussions != resolvable { mr.resolvableDiscussions = resolvable }
+        mr.apply(discussions: discussions, me: AccountSettings.current(in: context).gitLabUsername)
         try? context.save()
     }
 }

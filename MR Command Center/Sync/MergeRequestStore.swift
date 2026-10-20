@@ -25,15 +25,14 @@ struct RefreshOutcome: Equatable {
     var wasInitialLoad = false
 }
 
-/// Owns the reviewer MR list: fetches from GitLab, applies the caching rules,
-/// and persists `TrackedMR` rows.
+/// Owns the list of open MRs you review or authored: fetches from GitLab, applies the
+/// caching rules, persists `TrackedMR` rows, and records what changed as `ActivityEvent`s.
 @Observable
 final class MergeRequestStore {
-    /// Every open MR where the user is a reviewer, drafts included. Jira and static checks run on these.
-    private(set) var reviewerMergeRequests: [TrackedMR] = []
-    /// The MRs the list shows: drafts are left out unless `showsDrafts` is on.
-    private(set) var mergeRequests: [TrackedMR] = []
-    private(set) var showsDrafts = false
+    /// Every open MR where you're a reviewer or the author, drafts included.
+    private(set) var trackedMergeRequests: [TrackedMR] = []
+    /// Your GitLab username, once known.
+    private(set) var username: String?
     var selectedKey: String?
     private(set) var isRefreshing = false
     private(set) var problem: RefreshProblem?
@@ -52,22 +51,24 @@ final class MergeRequestStore {
         self.dependencies = dependencies
         let settings = AccountSettings.current(in: context)
         lastRefreshedAt = settings.lastMergeRequestRefreshAt
-        showsDrafts = settings.showDraftMergeRequests
+        username = settings.gitLabUsername
         reloadFromStore()
-    }
-
-    var hiddenDraftCount: Int { reviewerMergeRequests.count - mergeRequests.count }
-
-    func setShowsDrafts(_ isOn: Bool) {
-        guard isOn != showsDrafts else { return }
-        showsDrafts = isOn
-        AccountSettings.current(in: context).showDraftMergeRequests = isOn
-        finish()
     }
 
     var selected: TrackedMR? {
         guard let selectedKey else { return nil }
-        return mergeRequests.first { $0.key == selectedKey }
+        return mergeRequest(forKey: selectedKey)
+    }
+
+    func mergeRequest(forKey key: String) -> TrackedMR? {
+        trackedMergeRequests.first { $0.key == key }
+    }
+
+    /// Marks the MR's activity as seen.
+    func markSeen(_ mr: TrackedMR) {
+        guard mr.hasUnseenActivity else { return }
+        mr.seenAt = .now
+        save()
     }
 
     func reloadFromStore() {
@@ -76,12 +77,11 @@ final class MergeRequestStore {
             sortBy: [SortDescriptor(\.lastSeenUpdatedAt, order: .reverse)]
         )
         do {
-            reviewerMergeRequests = try context.fetch(descriptor)
+            trackedMergeRequests = try context.fetch(descriptor)
         } catch {
             Log.persistence.error("Fetching tracked MRs failed: \(error.localizedDescription, privacy: .public)")
         }
-        mergeRequests = showsDrafts ? reviewerMergeRequests : reviewerMergeRequests.filter { !$0.isDraft }
-        if let selectedKey, !mergeRequests.contains(where: { $0.key == selectedKey }) {
+        if let selectedKey, !trackedMergeRequests.contains(where: { $0.key == selectedKey }) {
             self.selectedKey = nil
         }
     }
@@ -117,7 +117,7 @@ final class MergeRequestStore {
             lastRefreshedAt = now
             problem = nil
             finish()
-            Log.sync.info("Refresh (\(String(describing: trigger), privacy: .public)): \(self.mergeRequests.count, privacy: .public) MRs, \(outcome.detailFetches, privacy: .public) detail fetches, \(outcome.pipelineFetches, privacy: .public) pipeline fetches")
+            Log.sync.info("Refresh (\(String(describing: trigger), privacy: .public)): \(self.trackedMergeRequests.count, privacy: .public) MRs, \(outcome.detailFetches, privacy: .public) detail fetches, \(outcome.pipelineFetches, privacy: .public) pipeline fetches")
             return outcome
         } catch is CancellationError {
             finish()
@@ -139,17 +139,21 @@ final class MergeRequestStore {
     }
 
     private func finish() {
+        save()
+        reloadFromStore()
+    }
+
+    private func save() {
         do {
             try context.save()
         } catch {
             Log.persistence.error("Saving refresh results failed: \(error.localizedDescription, privacy: .public)")
         }
-        reloadFromStore()
     }
 
     private func performRefresh(client: any GitLabAPI, settings: AccountSettings) async throws -> RefreshOutcome {
         let userID: Int
-        if let cached = settings.gitLabUserID {
+        if let cached = settings.gitLabUserID, settings.gitLabUsername != nil {
             userID = cached
         } else {
             let user = try await client.currentUser()
@@ -157,18 +161,32 @@ final class MergeRequestStore {
             settings.gitLabUsername = user.username
             userID = user.id
         }
+        username = settings.gitLabUsername
 
-        let items = try await client.openMergeRequests(reviewerID: userID)
+        async let reviewing = client.openMergeRequests(reviewerID: userID)
+        async let authored = client.openMergeRequests(authorID: userID)
+        let reviewingItems = try await reviewing
+        let authoredItems = try await authored
+        let reviewingKeys = Set(reviewingItems.map(\.key))
+        let authoredKeys = Set(authoredItems.map(\.key))
+        var items = reviewingItems
+        items += authoredItems.filter { !reviewingKeys.contains($0.key) }
+
         let existing = try context.fetch(FetchDescriptor<TrackedMR>())
         var byKey = Dictionary(existing.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var outcome = RefreshOutcome(wasInitialLoad: existing.isEmpty)
         var jobs: [DetailJob] = []
+        var before: [String: MRSnapshot] = [:]
         let now = Date.now
 
         for item in items {
             let mr: TrackedMR
             if let found = byKey[item.key] {
-                if !found.isInReviewerList { outcome.newMergeRequestKeys.append(item.key) }
+                if found.isInReviewerList {
+                    before[item.key] = MRSnapshot(found)
+                } else {
+                    outcome.newMergeRequestKeys.append(item.key)
+                }
                 found.update(from: item)
                 mr = found
             } else {
@@ -177,6 +195,10 @@ final class MergeRequestStore {
                 byKey[item.key] = mr
                 outcome.newMergeRequestKeys.append(item.key)
             }
+            let isReviewer = reviewingKeys.contains(item.key)
+            let isAuthor = authoredKeys.contains(item.key)
+            if mr.isReviewer != isReviewer { mr.isReviewer = isReviewer }
+            if mr.isAuthor != isAuthor { mr.isAuthor = isAuthor }
             let jiraKey = JiraKeyExtractor.extractKey(from: mr.sourceBranch, pattern: settings.branchKeyPattern)
             if mr.jiraKey != jiraKey { mr.jiraKey = jiraKey }
             mr.lastRefreshedAt = now
@@ -192,6 +214,7 @@ final class MergeRequestStore {
         let seen = Set(items.map(\.key))
         for mr in existing where mr.isInReviewerList && !seen.contains(mr.key) {
             mr.isInReviewerList = false
+            record(ActivityDetector.Change(kind: .left, message: "Merged or closed"), for: mr, at: now)
         }
         try context.save()
         reloadFromStore()
@@ -212,8 +235,39 @@ final class MergeRequestStore {
                 outcome.newlyFailedPipelineKeys.append(mr.key)
             }
         }
+
+        if !outcome.wasInitialLoad {
+            for key in outcome.newMergeRequestKeys {
+                guard let mr = byKey[key] else { continue }
+                let message = mr.isAuthor ? "You opened this merge request" : "\(mr.authorName) asked you to review"
+                record(ActivityDetector.Change(kind: .appeared, message: message), for: mr, at: now)
+            }
+        }
+        for (key, snapshot) in before {
+            guard let mr = byKey[key] else { continue }
+            for change in ActivityDetector.changes(from: snapshot, to: MRSnapshot(mr)) {
+                record(change, for: mr, at: now)
+            }
+        }
+        pruneActivity()
         if let blockingError { throw blockingError }
         return outcome
+    }
+
+    // MARK: Activity
+
+    /// Saves an activity line and marks the MR as having something new.
+    func record(_ change: ActivityDetector.Change, for mr: TrackedMR, at date: Date = .now) {
+        context.insert(ActivityEvent(kind: change.kind, message: change.message, mrKey: mr.key,
+                                     mrReference: mr.reference, mrTitle: mr.title, date: date))
+        mr.lastActivityAt = date
+    }
+
+    /// Keeps the newest events only.
+    private func pruneActivity(keeping limit: Int = 1000) {
+        guard let all = try? context.fetch(FetchDescriptor<ActivityEvent>(sortBy: [SortDescriptor(\.date, order: .reverse)])),
+              all.count > limit else { return }
+        for event in all[limit...] { context.delete(event) }
     }
 
     /// Always refetches one MR's details, approvals, discussions, and pipeline ("Refresh this MR").
@@ -225,8 +279,12 @@ final class MergeRequestStore {
         do {
             let client = try dependencies.gitLabClient(settings: AccountSettings.current(in: context))
             let job = DetailJob(key: mr.key, projectID: mr.projectID, iid: mr.iid, kind: .full)
+            let snapshot = MRSnapshot(mr)
             if let error = apply(await Self.fetch(job, client: client), to: mr) {
                 problem = error == .offline ? .offline : .credentials(error.localizedDescription)
+            }
+            for change in ActivityDetector.changes(from: snapshot, to: MRSnapshot(mr)) {
+                record(change, for: mr)
             }
         } catch {
             problem = .notConfigured
@@ -243,7 +301,7 @@ final class MergeRequestStore {
             mr.update(from: detail)
             mr.apply(pipeline: detail.headPipeline)
             mr.apply(approvals: approvals)
-            mr.apply(discussions: discussions)
+            mr.apply(discussions: discussions, me: username)
             if mr.changesCount != detail.changesCount { mr.changesCount = detail.changesCount }
             if let refs = detail.diffRefs {
                 if mr.baseSHA != refs.baseSha { mr.baseSHA = refs.baseSha }
@@ -327,17 +385,14 @@ final class MergeRequestStore {
 
     // MARK: Navigation
 
-    func selectNext() { moveSelection(by: 1) }
-    func selectPrevious() { moveSelection(by: -1) }
-
-    private func moveSelection(by offset: Int) {
-        guard !mergeRequests.isEmpty else { return }
-        guard let selectedKey, let index = mergeRequests.firstIndex(where: { $0.key == selectedKey }) else {
-            self.selectedKey = offset > 0 ? mergeRequests.first?.key : mergeRequests.last?.key
+    /// Moves the selection through `order` (the keys as the list shows them), clamping at the ends.
+    func moveSelection(by offset: Int, in order: [String]) {
+        guard !order.isEmpty else { return }
+        guard let selectedKey, let index = order.firstIndex(of: selectedKey) else {
+            self.selectedKey = offset > 0 ? order.first : order.last
             return
         }
-        let next = min(max(index + offset, 0), mergeRequests.count - 1)
-        self.selectedKey = mergeRequests[next].key
+        self.selectedKey = order[min(max(index + offset, 0), order.count - 1)]
     }
 
     func openSelectedInBrowser() {

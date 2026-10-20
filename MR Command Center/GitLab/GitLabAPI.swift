@@ -7,6 +7,8 @@ nonisolated protocol GitLabAPI: Sendable {
     func tokenInfo() async throws -> GitLabTokenInfo?
     /// Open MRs where the given user is a reviewer, across all projects. All pages.
     func openMergeRequests(reviewerID: Int) async throws -> [GitLabMergeRequest]
+    /// Open MRs the given user opened, across all projects. All pages.
+    func openMergeRequests(authorID: Int) async throws -> [GitLabMergeRequest]
     func mergeRequest(projectID: Int, iid: Int) async throws -> GitLabMergeRequest
     func approvals(projectID: Int, iid: Int) async throws -> GitLabApprovals
     /// All pages.
@@ -22,6 +24,8 @@ nonisolated protocol GitLabAPI: Sendable {
     func createDiscussion(projectID: Int, iid: Int, body: String) async throws -> GitLabDiscussion
     /// Replies to an existing thread. Requires the `api` scope.
     func replyToDiscussion(projectID: Int, iid: Int, discussionID: String, body: String) async throws -> GitLabDiscussion.Note
+    /// Merges the MR at exactly `options.sha`. Requires the `api` scope. Used only by merge rules.
+    func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest
 }
 
 nonisolated enum GitLabScopes {

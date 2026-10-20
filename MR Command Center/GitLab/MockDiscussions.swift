@@ -15,6 +15,7 @@ nonisolated enum MockDiscussions {
     private static let priya = GitLabUserRef(id: 17, username: "priya", name: "Priya Natarajan")
     private static let sam = GitLabUserRef(id: 44, username: "samlee", name: "Sam Lee")
     private static let lena = GitLabUserRef(id: 52, username: "lena", name: "Lena Fischer")
+    private static let me = GitLabUserRef(id: MockGitLabData.me.id, username: MockGitLabData.me.username, name: MockGitLabData.me.name)
     private static let reference = Date(timeIntervalSince1970: 1_790_000_000)
 
     private static func position(_ path: String, old: Int? = nil, new: Int? = nil, head: String) -> GitLabNotePosition {
@@ -42,6 +43,10 @@ nonisolated enum MockDiscussions {
             thread("412-429", at: position(file, new: 40, head: headSHA), resolved: false, [
                 (dana, "Should a `429` really be a permanent failure? Most providers send `Retry-After`.", 5),
                 (priya, "Good catch. I'll honor `Retry-After` and retry those.", 4),
+            ]),
+            thread("412-metric", at: position("app/webhooks/backoff.py", new: 12, head: headSHA), resolved: false, [
+                (me, "Can we count deliveries that run out of retries? We'll want an alert on that.", 3),
+                (priya, "Added `webhook_retry_exhausted_total`. Does that work for you?", 1),
             ]),
             thread("412-print", at: position(file, new: 42, head: headSHA), resolved: false, [
                 (dana, "Leftover debug **print**? This will spam stdout in production.", 5),

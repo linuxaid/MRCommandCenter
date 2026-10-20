@@ -53,7 +53,7 @@ struct AICommentPostingTests {
         let app = AppModel.testing(gitLab: spy, model: model)
         AccountSettings.current(in: app.modelContainer.mainContext).postCommentsEnabled = postingEnabled
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         app.aiReview.start(mr)
         await app.aiReview.wait(for: mr.key)
         let diff = try await app.diffs.diff(for: mr)
@@ -107,7 +107,7 @@ struct AICommentPostingTests {
 
         await #expect(throws: CommentPostingError.alreadyPosted) {
             _ = try await app.discussions.postAIConcern(concern, body: "again", on: diff.files[0].hunks[1].lines[0],
-                                                        in: diff.files[0], of: diff, mr: app.mergeRequests.mergeRequests.first { $0.iid == 412 }!)
+                                                        in: diff.files[0], of: diff, mr: app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 }!)
         }
         #expect(spy.count("createDiscussion") == 1)
     }

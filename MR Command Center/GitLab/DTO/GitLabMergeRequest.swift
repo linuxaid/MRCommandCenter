@@ -39,6 +39,9 @@ nonisolated struct GitLabMergeRequest: Decodable, Sendable, Equatable {
     var references: References?
     let webUrl: String
     var userNotesCount: Int?
+    /// GitLab's own auto-merge ("merge when pipeline succeeds") is set on this MR.
+    var mergeWhenPipelineSucceeds: Bool?
+    var reviewers: [GitLabUserRef]?
     var headPipeline: GitLabPipeline?
     var diffRefs: DiffRefs?
     /// Detail only. A string; `"1000+"` when GitLab stopped counting.
@@ -95,6 +98,7 @@ nonisolated struct GitLabApprovals: Decodable, Sendable, Equatable {
     var approvedBy: [Approver]?
 
     var given: Int { approvedBy?.count ?? 0 }
+    var approverUsernames: [String] { approvedBy?.map(\.user.username) ?? [] }
     var required: Int { approvalsRequired ?? 0 }
     var left: Int { approvalsLeft ?? max(0, required - given) }
 }
@@ -119,4 +123,13 @@ nonisolated enum PipelineStatus: String, Codable, Sendable, CaseIterable {
         default: false
         }
     }
+}
+
+/// Body for `PUT /projects/:id/merge_requests/:iid/merge`.
+nonisolated struct MergeOptions: Encodable, Sendable, Equatable {
+    /// GitLab refuses the merge (409) if the head moved past this commit, so nothing
+    /// the app didn't evaluate gets merged.
+    var sha: String
+    var squash: Bool?
+    var shouldRemoveSourceBranch: Bool?
 }

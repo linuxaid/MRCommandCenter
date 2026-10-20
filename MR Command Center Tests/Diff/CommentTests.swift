@@ -124,7 +124,7 @@ struct CommentPostingTests {
         let model = AppModel.testing(gitLab: spy)
         AccountSettings.current(in: model.modelContainer.mainContext).postCommentsEnabled = postingEnabled
         await model.mergeRequests.refresh(.automatic)
-        let mr = try #require(model.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         let diff = try await model.diffs.diff(for: mr)
         return (model, spy, mr, diff)
     }

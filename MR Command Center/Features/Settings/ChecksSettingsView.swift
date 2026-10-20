@@ -21,7 +21,7 @@ private struct GeneralForm: View {
                     LabeledContent("Refresh every", value: "\(settings.pollIntervalMinutes) min")
                 }
             } footer: {
-                Text("Automatic refresh runs only while the app is active. ⌘R refreshes at any time.")
+                Text("Automatic refresh runs while the app is active, and in the background when merge rules are switched on. ⌘R refreshes at any time.")
             }
             Section {
                 Stepper(value: $settings.collapseFileDiffThresholdLines, in: 50...5000, step: 50) {

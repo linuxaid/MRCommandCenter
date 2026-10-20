@@ -15,11 +15,12 @@ final class AppModel {
     let summaryPoster: SummaryPoster
     let evaluation: EvalService
     let jira: JiraService
+    let commandCenter: CommandCenter
 
     private(set) var hasGitLabToken = false
     private(set) var hasJiraToken = false
     var isInspectorPresented = false
-    var detailTab: DetailTab = .overview
+    var detailTab: DetailTab = .changes
     /// Set to jump the Changes tab to a file and line (e.g. from a check finding).
     var diffNavigation: DiffNavigation?
     /// What the inspector shows: a file review record, or a run's merge step.
@@ -39,16 +40,26 @@ final class AppModel {
         summaryPoster = SummaryPoster(container: modelContainer, aiReview: aiReview, discussions: discussions)
         evaluation = EvalService(container: modelContainer, dependencies: dependencies, diffs: diffs,
                                  staticChecks: staticChecks, aiReview: aiReview)
+        commandCenter = CommandCenter(container: modelContainer, dependencies: dependencies, store: mergeRequests)
         refreshTokenState()
     }
 
     var needsOnboarding: Bool { !hasGitLabToken }
 
-    /// Refreshes the MR list, then runs static checks for any new head SHAs.
+    /// Review mode: the selected MR fills the window, brief on the left and its changes on the right.
+    var isReviewing = false
+
+    func review(_ mr: TrackedMR) {
+        mergeRequests.selectedKey = mr.key
+        isReviewing = true
+    }
+
+    /// Refreshes the MR list, runs static checks for any new head SHAs, then lets merge rules act.
     func refresh(_ trigger: RefreshTrigger) async {
         await mergeRequests.refresh(trigger)
-        await jira.refresh(for: mergeRequests.reviewerMergeRequests, trigger: trigger)
-        await staticChecks.evaluateMissing(mergeRequests.reviewerMergeRequests)
+        await jira.refresh(for: mergeRequests.trackedMergeRequests, trigger: trigger)
+        await staticChecks.evaluateMissing(mergeRequests.trackedMergeRequests)
+        await commandCenter.runRules()
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
@@ -84,13 +95,13 @@ final class AppModel {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case overview, changes, aiReview
+    case changes, aiReview, overview
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .overview: "Overview"
+        case .overview: "Details"
         case .changes: "Changes"
         case .aiReview: "AI Review"
         }

@@ -4,7 +4,7 @@ import Synchronization
 /// In-memory GitLab used by previews, `-UseMockData` launches, and tests.
 /// Copies share one store, so comments posted in mock mode show up on the next fetch.
 nonisolated struct MockGitLabClient: GitLabAPI {
-    var user = GitLabUser(id: 42, username: "aj", name: "A.J. Reviewer")
+    var user = MockGitLabData.me
     var scopes = ["read_api", "api"]
     var failure: APIError?
     private let store: MockGitLabStore
@@ -28,7 +28,20 @@ nonisolated struct MockGitLabClient: GitLabAPI {
 
     func openMergeRequests(reviewerID: Int) async throws -> [GitLabMergeRequest] {
         try check()
-        return data.entries.map(\.listItem)
+        return data.entries.filter { $0.detail.author.id != reviewerID }.map(\.listItem)
+    }
+
+    func openMergeRequests(authorID: Int) async throws -> [GitLabMergeRequest] {
+        try check()
+        return data.entries.filter { $0.detail.author.id == authorID }.map(\.listItem)
+    }
+
+    /// Merging removes the MR from the open lists, like GitLab does.
+    func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
+        let entry = try entry(projectID, iid)
+        guard entry.detail.sha == options.sha else { throw APIError.server(status: 409) }
+        store.remove(projectID: projectID, iid: iid)
+        return entry.detail
     }
 
     func mergeRequest(projectID: Int, iid: Int) async throws -> GitLabMergeRequest {
@@ -129,6 +142,12 @@ nonisolated final class MockGitLabStore: Sendable {
 
     var data: MockGitLabData { state.withLock { $0 } }
 
+    func remove(projectID: Int, iid: Int) {
+        state.withLock { data in
+            data.entries.removeAll { $0.detail.projectId == projectID && $0.detail.iid == iid }
+        }
+    }
+
     func mutate(projectID: Int, iid: Int, _ change: (inout MockGitLabData.Entry) -> Void) {
         state.withLock { data in
             if let index = data.entries.firstIndex(where: { $0.detail.projectId == projectID && $0.detail.iid == iid }) {
@@ -181,8 +200,21 @@ nonisolated struct MockGitLabData: Sendable {
              pipeline: nil, approvals: (0, 1), unresolved: 0, labels: ["performance"]),
         make(project: (101, "payments/api"), iid: 420, title: "Add idempotency keys to the refund endpoint",
              branch: "feature/PAY-160-refund-idempotency", author: ("Sam Lee", "samlee"), hoursAgo: 72,
-             pipeline: "manual", approvals: (1, 2), unresolved: 5, labels: ["backend", "payments"]),
+             pipeline: "manual", approvals: (1, 2), unresolved: 5, labels: ["backend", "payments"], approvedByMe: true),
+        // Opened by the mock user, so they show up through the author list.
+        make(project: (404, "platform/gateway"), iid: 233, title: "Add request tracing headers to the gateway",
+             branch: "feature/GW-31-tracing", author: (MockGitLabData.me.name, MockGitLabData.me.username), hoursAgo: 2,
+             pipeline: "success", approvals: (2, 2), unresolved: 0, labels: ["backend"], authorID: MockGitLabData.me.id),
+        make(project: (505, "ios/app"), iid: 1290, title: "Move the settings screen to SwiftUI",
+             branch: "feature/IOS-402-settings-swiftui", author: (MockGitLabData.me.name, MockGitLabData.me.username), hoursAgo: 4,
+             pipeline: "failed", approvals: (1, 2), unresolved: 0, labels: ["frontend"], authorID: MockGitLabData.me.id),
+        make(project: (505, "ios/app"), iid: 1295, title: "Bump swift-collections to 1.2.1",
+             branch: "renovate/swift-collections-1.x", author: ("Renovate Bot", "renovate-bot"), hoursAgo: 6,
+             pipeline: "success", approvals: (1, 1), unresolved: 0, labels: ["dependencies"]),
     ])
+
+    /// The signed-in user in mock mode (`MockGitLabClient.user`).
+    static let me = GitLabUser(id: 42, username: "aj", name: "A.J. Reviewer")
 
     private static let labelColors = [
         "backend": "#6699CC", "payments": "#009966", "frontend": "#8E44AD", "infra": "#36454F",
@@ -190,6 +222,21 @@ nonisolated struct MockGitLabData: Sendable {
     ]
 
     private static let reference = Date(timeIntervalSince1970: 1_790_000_000)
+
+    /// What GitLab would report, checked in its usual order.
+    private static func mergeStatus(pipeline: String?, approvals: (given: Int, required: Int), unresolved: Int,
+                                    draft: Bool, conflicts: Bool) -> String {
+        if draft { return "draft_status" }
+        if conflicts { return "conflict" }
+        switch pipeline {
+        case "failed", "canceled", "manual": return "ci_must_pass"
+        case "running", "pending": return "ci_still_running"
+        default: break
+        }
+        if approvals.given < approvals.required { return "not_approved" }
+        if unresolved > 0 { return "discussions_not_resolved" }
+        return "mergeable"
+    }
 
     private static func make(
         project: (id: Int, path: String),
@@ -203,7 +250,9 @@ nonisolated struct MockGitLabData: Sendable {
         unresolved: Int,
         labels: [String],
         draft: Bool = false,
-        conflicts: Bool = false
+        conflicts: Bool = false,
+        approvedByMe: Bool = false,
+        authorID: Int? = nil
     ) -> Entry {
         let sha = String(repeating: String(format: "%02x", iid % 256), count: 20)
         let updated = reference.addingTimeInterval(-hoursAgo * 3600)
@@ -218,12 +267,14 @@ nonisolated struct MockGitLabData: Sendable {
             updatedAt: updated,
             sourceBranch: branch,
             targetBranch: "main",
-            author: GitLabUserRef(id: author.username.unicodeScalars.reduce(100) { $0 + Int($1.value) }, username: author.username, name: author.name),
+            author: GitLabUserRef(id: authorID ?? author.username.unicodeScalars.reduce(100) { $0 + Int($1.value) },
+                                  username: author.username, name: author.name),
             draft: draft,
             labels: labels.map { GitLabLabel(name: $0, color: labelColors[$0], textColor: "#FFFFFF") },
             sha: sha,
             hasConflicts: conflicts,
-            detailedMergeStatus: conflicts ? "conflict" : "mergeable",
+            detailedMergeStatus: mergeStatus(pipeline: pipeline, approvals: approvals, unresolved: unresolved,
+                                             draft: draft, conflicts: conflicts),
             references: .init(full: "\(project.path)!\(iid)"),
             webUrl: "https://gitlab.example.com/\(project.path)/-/merge_requests/\(iid)",
             userNotesCount: unresolved * 2,
@@ -234,8 +285,13 @@ nonisolated struct MockGitLabData: Sendable {
             diffRefs: .init(baseSha: String(repeating: "0", count: 40), headSha: sha, startSha: String(repeating: "0", count: 40)),
             changesCount: MockDiffs.changesCount(forIID: iid)
         )
-        let approvers = (0..<approvals.given).map {
-            GitLabApprovals.Approver(user: GitLabUserRef(id: 900 + $0, username: "approver\($0)", name: "Approver \($0)"))
+        let approverNames = [("dana", "Dana Okafor"), ("samlee", "Sam Lee"), ("lena", "Lena Fischer")]
+        var approvers = (0..<approvals.given).map {
+            let (username, name) = approverNames[$0 % approverNames.count]
+            return GitLabApprovals.Approver(user: GitLabUserRef(id: 900 + $0, username: username, name: name))
+        }
+        if approvedByMe, !approvers.isEmpty {
+            approvers[0] = GitLabApprovals.Approver(user: GitLabUserRef(id: me.id, username: me.username, name: me.name))
         }
         let discussions = (0..<unresolved).map {
             GitLabDiscussion(id: "d\(iid)-\($0)", individualNote: false,

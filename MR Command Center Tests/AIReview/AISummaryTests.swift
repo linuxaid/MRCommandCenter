@@ -39,7 +39,7 @@ struct AIOpenConcernAndSummaryTests {
         let app = AppModel.testing(gitLab: spy, model: model)
         AccountSettings.current(in: app.modelContainer.mainContext).postCommentsEnabled = postingEnabled
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 412 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         app.aiReview.start(mr)
         await app.aiReview.wait(for: mr.key)
         let run = try #require(app.aiReview.latestRun(for: mr.key))
@@ -107,7 +107,7 @@ struct AIOpenConcernAndSummaryTests {
     @Test func cleanReviewsAreNotWorthASummary() async throws {
         let app = AppModel.testing()
         await app.refresh(.automatic)
-        let mr = try #require(app.mergeRequests.mergeRequests.first { $0.iid == 1880 })
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1880 })
         app.aiReview.start(mr)
         await app.aiReview.wait(for: mr.key)
         let run = try #require(app.aiReview.latestRun(for: mr.key))

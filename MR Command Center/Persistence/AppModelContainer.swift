@@ -15,6 +15,8 @@ enum AppModelContainer {
         EvalCase.self,
         EvalBatch.self,
         JiraCheck.self,
+        ActivityEvent.self,
+        MergeRule.self,
     ])
 
     static func make(inMemory: Bool) throws -> ModelContainer {

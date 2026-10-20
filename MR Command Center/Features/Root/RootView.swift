@@ -2,54 +2,36 @@ import AppKit
 import SwiftData
 import SwiftUI
 
-/// Main window: sidebar (MR list) + detail, with a toggleable inspector for AI run debugging.
+/// Main window: where to look (sidebar), what's there (triage, activity, or rules), and the
+/// brief for the selected MR or the rule being edited. Review mode swaps all of that for one MR,
+/// brief and changes side by side.
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openSettings) private var openSettings
     @Query private var settingsRows: [AccountSettings]
 
     private var store: MergeRequestStore { appModel.mergeRequests }
+    private var center: CommandCenter { appModel.commandCenter }
 
     private var pollInterval: TimeInterval {
         TimeInterval(max(1, settingsRows.first?.pollIntervalMinutes ?? 5) * 60)
     }
 
     var body: some View {
-        @Bindable var appModel = appModel
-
-        NavigationSplitView {
-            MRSidebar(store: store, needsOnboarding: appModel.needsOnboarding) { await appModel.refresh(.manual) }
-                .navigationSplitViewColumnWidth(min: 280, ideal: 340)
-        } detail: {
-            HStack(spacing: 0) {
-                Group {
-                    if let mr = store.selected {
-                        MRDetailView(mr: mr)
-                    } else {
-                        ContentUnavailableView(
-                            "No Merge Request Selected",
-                            systemImage: "arrow.triangle.pull",
-                            description: Text("Select a merge request from the sidebar.")
-                        )
-                    }
-                }
-                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-
-                if appModel.isInspectorPresented {
-                    Divider()
-                    InspectorPanel()
-                        .frame(minWidth: 220, idealWidth: 300, maxWidth: 300, maxHeight: .infinity)
-                        .transition(.move(edge: .trailing))
-                }
+        Group {
+            if appModel.isReviewing, let mr = store.selected {
+                ReviewMode(mr: mr)
+                    .transition(.opacity)
+            } else {
+                commandCenter
             }
-            .animation(.default, value: appModel.isInspectorPresented)
-            // A fixed minimum that doesn't depend on content. Content-derived minimums, and
-            // SwiftUI's `.inspector` (which reserves ~600 pt and can't grow the window), made
-            // AppKit loop on constraint passes and crash with all panels open.
-            .frame(minWidth: Self.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .sheet(item: Bindable(appModel.summaryPoster).draft) { _ in
-            SummaryPreviewSheet(poster: appModel.summaryPoster)
+        .animation(.easeInOut(duration: 0.18), value: appModel.isReviewing)
+        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                RefreshButton()
+            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
@@ -72,6 +54,56 @@ struct RootView: View {
             guard !appModel.needsOnboarding else { return }
             Task { await appModel.refreshIfStale(olderThan: pollInterval) }
         }
+        .onChange(of: store.selectedKey) { _, key in
+            // The reviewed MR merged or closed: go back to the overview.
+            if key == nil { appModel.isReviewing = false }
+        }
+    }
+
+    private var commandCenter: some View {
+        @Bindable var center = center
+
+        return NavigationSplitView {
+            CommandSidebar(destination: $center.destination)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+        } content: {
+            Group {
+                switch center.destination {
+                case .briefing, .lane:
+                    TriageView(destination: center.destination)
+                case .activity:
+                    ActivityView()
+                case .rules:
+                    RulesListView()
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 360, ideal: 520)
+        } detail: {
+            detail
+                // A fixed minimum that doesn't depend on content. Content-derived minimums made
+                // AppKit loop on constraint passes and crash (see LayoutStressTests).
+                .frame(minWidth: Self.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.canvas)
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if center.destination == .rules {
+            if let id = center.selectedRuleID, let rule = center.rules.first(where: { $0.id == id }) {
+                RuleEditor(rule: rule)
+                    .id(rule.id)
+            } else {
+                ContentUnavailableView("No Rule Selected", systemImage: "wand.and.stars",
+                                       description: Text("Pick a rule to edit it, or create one."))
+            }
+        } else if let mr = store.selected {
+            BriefPanel(mr: mr)
+                .id(mr.key)
+        } else {
+            ContentUnavailableView("Pick a Merge Request", systemImage: "text.page",
+                                   description: Text("Its brief shows what's happening, what it needs, and who has to act."))
+        }
     }
 
     @ViewBuilder
@@ -92,7 +124,8 @@ struct RootView: View {
         }
     }
 
-    /// Refreshes on appear, then every poll interval while the app is active.
+    /// Refreshes on appear, then every poll interval. In the background it keeps going only
+    /// while live merge rules need to watch for ready MRs.
     private func poll() async {
         guard !appModel.needsOnboarding else { return }
         await appModel.refresh(.automatic)
@@ -102,7 +135,8 @@ struct RootView: View {
             } catch {
                 return
             }
-            if NSApplication.shared.isActive {
+            let rulesNeedWatching = center.isAutoMergeLive && center.hasEnabledRules
+            if NSApplication.shared.isActive || rulesNeedWatching {
                 await appModel.refresh(.automatic)
             }
         }
@@ -110,7 +144,7 @@ struct RootView: View {
 }
 
 extension RootView {
-    /// Fixed so the window minimum never depends on content (sidebar 280 + this).
+    /// Fixed so the window minimum never depends on content.
     static let detailMinWidth: CGFloat = 320
 }
 
@@ -119,28 +153,36 @@ private struct PollConfiguration: Equatable {
     let enabled: Bool
 }
 
+/// Refresh, with the last refresh time underneath.
+private struct RefreshButton: View {
+    @Environment(AppModel.self) private var appModel
+
+    private var store: MergeRequestStore { appModel.mergeRequests }
+
+    var body: some View {
+        Button {
+            Task { await appModel.refresh(.manual) }
+        } label: {
+            if store.isRefreshing {
+                ProgressView().controlSize(.small)
+            } else {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+        }
+        .disabled(store.isRefreshing || appModel.needsOnboarding)
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        guard let last = store.lastRefreshedAt else { return "Refresh (⌘R)" }
+        return "Refresh (⌘R). Last refreshed \(last.formatted(date: .omitted, time: .shortened))."
+    }
+}
+
 #Preview {
     let model = AppModel.preview()
     RootView()
         .environment(model)
         .modelContainer(model.modelContainer)
-        .frame(width: 1100, height: 700)
-}
-
-/// Preview of the AI summary thread before it's posted to the MR.
-private struct SummaryPreviewSheet: View {
-    @Bindable var poster: SummaryPoster
-
-    var body: some View {
-        PostPreviewSheet(
-            title: "Post AI Summary to the Merge Request",
-            location: poster.draft?.location ?? "",
-            text: Binding(get: { poster.draft?.body ?? "" }, set: { poster.draft?.body = $0 }),
-            isPostingEnabled: poster.isPostingEnabled,
-            isPosting: poster.isPosting,
-            error: poster.error,
-            post: { Task { await poster.post() } },
-            cancel: { poster.draft = nil }
-        )
-    }
+        .frame(width: 1300, height: 800)
 }

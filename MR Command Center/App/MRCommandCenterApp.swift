@@ -39,6 +39,7 @@ struct MRCommandCenterApp: App {
     var body: some Scene {
         Window("MR Command Center", id: "main") {
             RootView()
+                .preferredColorScheme(.light)
         }
         .modelContainer(appModel.modelContainer)
         .environment(appModel)
@@ -48,6 +49,7 @@ struct MRCommandCenterApp: App {
 
         Window("Evaluation", id: "evaluation") {
             EvaluationView()
+                .preferredColorScheme(.light)
         }
         .modelContainer(appModel.modelContainer)
         .environment(appModel)
@@ -55,6 +57,7 @@ struct MRCommandCenterApp: App {
 
         Settings {
             SettingsView()
+                .preferredColorScheme(.light)
         }
         .modelContainer(appModel.modelContainer)
         .environment(appModel)

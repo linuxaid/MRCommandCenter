@@ -101,9 +101,30 @@ nonisolated struct HTTPClient: Sendable {
         body: Body,
         decoder: JSONDecoder
     ) async throws -> T {
+        try await sendJSON(type, method: "POST", path: path, body: body, decoder: decoder)
+    }
+
+    /// PUTs a JSON body (snake_case keys, nil fields omitted) and decodes the response.
+    @concurrent
+    func put<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ type: T.Type,
+        path: String,
+        body: Body,
+        decoder: JSONDecoder
+    ) async throws -> T {
+        try await sendJSON(type, method: "PUT", path: path, body: body, decoder: decoder)
+    }
+
+    private func sendJSON<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ type: T.Type,
+        method: String,
+        path: String,
+        body: Body,
+        decoder: JSONDecoder
+    ) async throws -> T {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        let request = try makeRequest(path: path, method: "POST", body: try encoder.encode(body))
+        let request = try makeRequest(path: path, method: method, body: try encoder.encode(body))
         let response = try await send(request)
         return try Self.decode(type, from: response.data, decoder: decoder)
     }
