@@ -52,7 +52,7 @@ struct TriageTests {
         #expect(failed.ballWith == .author("Marco"))
 
         let mine = try situation(app, 233)
-        #expect(mine.headline == "Ready. Merge it in GitLab.")
+        #expect(mine.headline == "Ready for you to merge")
         #expect(mine.readiness.isReady)
     }
 
@@ -335,5 +335,96 @@ struct ThreadTurnsTests {
 
     @Test func unknownUserCountsNothing() {
         #expect(ThreadTurns(discussions: [thread([priya])], me: nil, isMyMR: true) == ThreadTurns(discussions: [], me: nil, isMyMR: true))
+    }
+}
+
+@MainActor
+struct ManualActionTests {
+    private func loaded() async -> (AppModel, SpyGitLabClient) {
+        let spy = SpyGitLabClient()
+        let app = AppModel.testing(gitLab: spy)
+        await app.refresh(.automatic)
+        return (app, spy)
+    }
+
+    private func mr(_ app: AppModel, _ iid: Int) throws -> TrackedMR {
+        try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == iid })
+    }
+
+    @Test func approvingMovesItOutOfYourMove() async throws {
+        let (app, spy) = await loaded()
+        let lazy = try mr(app, 1884)
+        #expect(app.commandCenter.situation(for: lazy).lane == .yourMove)
+
+        await app.commandCenter.approve(lazy)
+
+        #expect(spy.count("approve") == 1)
+        #expect(lazy.approvedByUsernames.contains("aj"))
+        #expect(app.commandCenter.situation(for: lazy).lane == .readyToMerge)
+        #expect(app.commandCenter.actionErrors[lazy.key] == nil)
+    }
+
+    @Test func revokingPutsItBack() async throws {
+        let (app, _) = await loaded()
+        let lazy = try mr(app, 1884)
+        await app.commandCenter.approve(lazy)
+
+        await app.commandCenter.revokeApproval(lazy)
+
+        #expect(!lazy.approvedByUsernames.contains("aj"))
+        #expect(app.commandCenter.situation(for: lazy).lane == .yourMove)
+    }
+
+    @Test func approvalFailureIsExplained() async throws {
+        let (app, spy) = await loaded()
+        spy.edit { $0.mergeFailure = .forbidden }
+        let lazy = try mr(app, 1884)
+
+        await app.commandCenter.approve(lazy)
+
+        #expect(app.commandCenter.actionErrors[lazy.key]?.contains("api scope") == true)
+    }
+
+    @Test func mergeIsPinnedToTheCommitYouSaw() async throws {
+        let (app, spy) = await loaded()
+        let gateway = try mr(app, 233)
+        app.commandCenter.requestMerge(gateway)
+        var draft = try #require(app.commandCenter.mergeDraft)
+        #expect(draft.notReady.isEmpty)
+        draft.squash = true
+
+        await app.commandCenter.merge(draft)
+
+        #expect(spy.state.withLock { $0.merges.last?.sha } == draft.sha)
+        #expect(spy.state.withLock { $0.merges.last?.squash } == true)
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 })
+    }
+
+    @Test func mergeRefusesIfTheHeadMovedAfterConfirming() async throws {
+        let (app, spy) = await loaded()
+        let gateway = try mr(app, 233)
+        app.commandCenter.requestMerge(gateway)
+        let draft = try #require(app.commandCenter.mergeDraft)
+        gateway.headSHA = String(repeating: "f", count: 40)
+
+        await app.commandCenter.merge(draft)
+
+        #expect(spy.count("merge") == 0)
+        #expect(app.commandCenter.actionErrors[gateway.key] != nil)
+    }
+
+    @Test func runningPipelineOffersMergeWhenItSucceeds() async throws {
+        let (app, spy) = await loaded()
+        let terraform = try mr(app, 77)
+        app.commandCenter.requestMerge(terraform)
+        let draft = try #require(app.commandCenter.mergeDraft)
+        #expect(draft.pipelineRunning && draft.whenPipelineSucceeds)
+
+        await app.commandCenter.merge(draft)
+
+        #expect(spy.state.withLock { $0.merges.last?.mergeWhenPipelineSucceeds } == true)
+        #expect(terraform.isInReviewerList, "Still open until the pipeline passes")
+        #expect(terraform.mergeWhenPipelineSucceeds)
+        #expect(app.commandCenter.situation(for: terraform).lane == .autoMerge)
     }
 }

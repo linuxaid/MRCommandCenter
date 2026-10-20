@@ -25,6 +25,7 @@ struct BriefPanel: View {
                 if style == .full {
                     header(situation)
                     actions
+                    MRActionError(mr: mr)
                 }
                 whatsHappening(situation, tint: tint)
                 if style == .full {
@@ -67,23 +68,23 @@ struct BriefPanel: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
+            MRActionButtons(mr: mr)
             Button {
                 appModel.review(mr)
             } label: {
                 Label("Review Here", systemImage: "rectangle.split.2x1")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.ink)
             .help("Brief and changes side by side in this window (Return or ⌘↩)")
+            Spacer()
             if let url = URL(string: mr.webURL) {
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
                     Label("Open in GitLab", systemImage: "arrow.up.forward.app")
+                        .labelStyle(.iconOnly)
                 }
-                .help("Approve and merge in GitLab (⌘O)")
+                .help("Open in GitLab (⌘O)")
             }
-            Spacer()
             Button {
                 Task { await appModel.refreshDetails(for: mr) }
             } label: {

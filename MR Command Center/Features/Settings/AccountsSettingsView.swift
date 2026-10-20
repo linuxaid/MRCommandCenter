@@ -74,7 +74,7 @@ private struct GitLabSection: View {
         } header: {
             Text("GitLab")
         } footer: {
-            Text("Create a token under User Settings → Access Tokens. **read_api** is enough for reading. Posting comments needs **api**, which also allows other writes, so only turn it on if you want to comment from this app. The app never approves MRs. It only merges through Merge Rules, and only when you switch merging on there (that needs **api**).")
+            Text("Create a token under User Settings → Access Tokens. **read_api** is enough for reading. Approving, merging, and posting comments need **api**. The app approves and merges only when you click Approve or confirm a merge, or when a merge rule you switched on fires.")
         }
     }
 }

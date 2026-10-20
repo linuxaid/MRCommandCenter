@@ -36,10 +36,44 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return data.entries.filter { $0.detail.author.id == authorID }.map(\.listItem)
     }
 
-    /// Merging removes the MR from the open lists, like GitLab does.
+    func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
+        let entry = try entry(projectID, iid)
+        guard entry.detail.sha == sha else { throw APIError.server(status: 409) }
+        guard !entry.approvals.approverUsernames.contains(user.username) else { throw APIError.server(status: 401) }
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            var approvals = entry.approvals
+            let me = GitLabUserRef(id: user.id, username: user.username, name: user.name)
+            approvals.approvedBy = (approvals.approvedBy ?? []) + [GitLabApprovals.Approver(user: me)]
+            approvals.approvalsLeft = max(0, approvals.required - approvals.given)
+            approvals.approved = approvals.left == 0
+            entry.approvals = approvals
+            entry.bumpUpdatedAt()
+        }
+        return try self.entry(projectID, iid).approvals
+    }
+
+    func unapprove(projectID: Int, iid: Int) async throws {
+        _ = try entry(projectID, iid)
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            entry.approvals.approvedBy?.removeAll { $0.user.username == user.username }
+            entry.approvals.approvalsLeft = max(0, entry.approvals.required - entry.approvals.given)
+            entry.approvals.approved = entry.approvals.left == 0
+            entry.bumpUpdatedAt()
+        }
+    }
+
+    /// Merging removes the MR from the open lists, like GitLab does. With "merge when the
+    /// pipeline succeeds" and a pipeline still going, it only sets that flag.
     func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
         let entry = try entry(projectID, iid)
         guard entry.detail.sha == options.sha else { throw APIError.server(status: 409) }
+        if options.mergeWhenPipelineSucceeds == true, entry.detail.headPipeline?.pipelineStatus.isActive == true {
+            store.mutate(projectID: projectID, iid: iid) { entry in
+                entry.detail.mergeWhenPipelineSucceeds = true
+                entry.bumpUpdatedAt()
+            }
+            return try self.entry(projectID, iid).detail
+        }
         store.remove(projectID: projectID, iid: iid)
         return entry.detail
     }
@@ -164,6 +198,27 @@ nonisolated struct MockGitLabData: Sendable {
         var approvals: GitLabApprovals
         var discussions: [GitLabDiscussion]
         var diffs: [GitLabDiff] = []
+
+        /// Writes change `updated_at`, which is what makes the app refetch details.
+        mutating func bumpUpdatedAt() {
+            let d = detail
+            detail = GitLabMergeRequest(
+                id: d.id, iid: d.iid, projectId: d.projectId, title: d.title, description: d.description, state: d.state,
+                createdAt: d.createdAt, updatedAt: d.updatedAt.addingTimeInterval(60), sourceBranch: d.sourceBranch,
+                targetBranch: d.targetBranch, author: d.author, draft: d.draft, workInProgress: d.workInProgress,
+                labels: d.labels, sha: d.sha, hasConflicts: d.hasConflicts,
+                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left),
+                references: d.references, webUrl: d.webUrl, userNotesCount: d.userNotesCount,
+                mergeWhenPipelineSucceeds: d.mergeWhenPipelineSucceeds, reviewers: d.reviewers,
+                headPipeline: d.headPipeline, diffRefs: d.diffRefs, changesCount: d.changesCount
+            )
+        }
+
+        private static func status(_ status: String?, approvalsLeft: Int) -> String? {
+            if approvalsLeft == 0 && status == "not_approved" { return "mergeable" }
+            if approvalsLeft > 0 && status == "mergeable" { return "not_approved" }
+            return status
+        }
 
         var listItem: GitLabMergeRequest {
             var item = detail

@@ -40,6 +40,23 @@ struct AppCommands: Commands {
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(store.selected == nil)
 
+            Button("Approve or Revoke Approval") {
+                guard let mr = store.selected, !mr.isAuthor else { return }
+                let iApproved = store.username.map { mr.approvedByUsernames.contains($0) } ?? false
+                Task { iApproved ? await center.revokeApproval(mr) : await center.approve(mr) }
+            }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .disabled(store.selected == nil || store.selected?.isAuthor == true)
+
+            Button("Merge…") {
+                guard let mr = store.selected else { return }
+                center.requestMerge(mr)
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+            .disabled(store.selected == nil || store.selected?.isDraft == true)
+
+            Divider()
+
             Button("Run AI Review") {
                 guard let mr = store.selected else { return }
                 appModel.detailTab = .aiReview

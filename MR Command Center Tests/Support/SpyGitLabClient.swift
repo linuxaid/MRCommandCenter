@@ -51,6 +51,22 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         return try await mock.openMergeRequests(authorID: authorID)
     }
 
+    func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
+        record("approve")
+        if let failure = state.withLock({ $0.mergeFailure }) { throw failure }
+        let client = mock
+        let approvals = try await client.approve(projectID: projectID, iid: iid, sha: sha)
+        edit { $0.data = client.data }
+        return approvals
+    }
+
+    func unapprove(projectID: Int, iid: Int) async throws {
+        record("unapprove")
+        let client = mock
+        try await client.unapprove(projectID: projectID, iid: iid)
+        edit { $0.data = client.data }
+    }
+
     func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
         record("merge")
         if let failure = state.withLock({ $0.mergeFailure }) { throw failure }

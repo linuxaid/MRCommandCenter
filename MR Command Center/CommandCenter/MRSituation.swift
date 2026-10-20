@@ -19,7 +19,7 @@ enum Lane: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .yourMove: "Waiting on a decision or a reply from you"
-        case .readyToMerge: "All green. Merge them in GitLab."
+        case .readyToMerge: "All green and waiting for someone to merge"
         case .autoMerge: "A merge rule or GitLab will merge these when they're ready"
         case .inFlight: "Moving along without you"
         case .drafts: "Not ready for review yet"
@@ -139,7 +139,7 @@ struct MRSituation: Equatable {
                 }
                 notes.append(contentsOf: rule.unmet.map { "Rule “\(rule.ruleName)” waits until \($0)" })
             }
-            return situation(.readyToMerge, mr.isAuthor ? "Ready. Merge it in GitLab." : "Ready to merge", mr.isAuthor ? .you : .nobody)
+            return situation(.readyToMerge, mr.isAuthor ? "Ready for you to merge" : "Ready to merge", mr.isAuthor ? .you : .nobody)
         }
         if mr.mergeWhenPipelineSucceeds {
             return situation(.autoMerge, "GitLab will merge it when the pipeline passes", .gitLab)

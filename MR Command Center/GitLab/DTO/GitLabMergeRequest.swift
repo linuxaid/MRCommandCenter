@@ -132,4 +132,12 @@ nonisolated struct MergeOptions: Encodable, Sendable, Equatable {
     var sha: String
     var squash: Bool?
     var shouldRemoveSourceBranch: Bool?
+    /// Let GitLab merge once the running pipeline passes, instead of merging now.
+    var mergeWhenPipelineSucceeds: Bool?
+}
+
+/// Body for `POST /projects/:id/merge_requests/:iid/approve`.
+nonisolated struct ApproveRequest: Encodable, Sendable, Equatable {
+    /// GitLab refuses the approval (409) if the head moved past this commit.
+    var sha: String
 }

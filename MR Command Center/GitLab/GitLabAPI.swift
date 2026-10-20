@@ -24,7 +24,11 @@ nonisolated protocol GitLabAPI: Sendable {
     func createDiscussion(projectID: Int, iid: Int, body: String) async throws -> GitLabDiscussion
     /// Replies to an existing thread. Requires the `api` scope.
     func replyToDiscussion(projectID: Int, iid: Int, discussionID: String, body: String) async throws -> GitLabDiscussion.Note
-    /// Merges the MR at exactly `options.sha`. Requires the `api` scope. Used only by merge rules.
+    /// Approves the MR at exactly `sha`. Requires the `api` scope.
+    func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals
+    /// Removes your approval. Requires the `api` scope.
+    func unapprove(projectID: Int, iid: Int) async throws
+    /// Merges the MR at exactly `options.sha` (or sets it to merge when the pipeline passes). Requires the `api` scope.
     func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest
 }
 

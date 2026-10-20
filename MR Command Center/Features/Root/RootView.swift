@@ -27,6 +27,9 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.18), value: appModel.isReviewing)
+        .sheet(item: Bindable(center).mergeDraft) { draft in
+            MergeSheet(draft: draft)
+        }
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

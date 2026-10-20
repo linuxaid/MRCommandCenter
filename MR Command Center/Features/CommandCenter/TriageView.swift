@@ -263,6 +263,12 @@ private struct RowMenu: View {
 
     var body: some View {
         Button("Review Here") { appModel.review(mr) }
+        if !mr.isAuthor, let me = appModel.mergeRequests.username, !mr.approvedByUsernames.contains(me) {
+            Button("Approve") { Task { await appModel.commandCenter.approve(mr) } }
+        }
+        Button("Merge…") { appModel.commandCenter.requestMerge(mr) }
+            .disabled(mr.isDraft || !mr.hasLoadedDetails)
+        Divider()
         if let url = URL(string: mr.webURL) {
             Button("Open in GitLab") { NSWorkspace.shared.open(url) }
         }

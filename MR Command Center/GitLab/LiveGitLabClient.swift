@@ -91,6 +91,16 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
                                    body: NewNoteRequest(body: body), decoder: .gitLab)
     }
 
+    func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
+        try await http.post(GitLabApprovals.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/approve",
+                            body: ApproveRequest(sha: sha), decoder: .gitLab)
+    }
+
+    func unapprove(projectID: Int, iid: Int) async throws {
+        let request = try http.makeRequest(path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/unapprove", method: "POST")
+        _ = try await http.send(request)
+    }
+
     func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
         try await http.put(GitLabMergeRequest.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/merge",
                            body: options, decoder: .gitLab)

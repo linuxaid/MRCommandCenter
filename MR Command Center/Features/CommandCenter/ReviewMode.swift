@@ -12,6 +12,12 @@ struct ReviewMode: View {
     var body: some View {
         VStack(spacing: 0) {
             ReviewHeaderBar(mr: mr)
+            if appModel.commandCenter.actionErrors[mr.key] != nil {
+                MRActionError(mr: mr)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Theme.danger.opacity(0.08))
+            }
             Divider()
             HStack(spacing: 0) {
                 BriefPanel(mr: mr, style: .rail)
@@ -127,11 +133,12 @@ private struct ReviewHeaderBar: View {
                     NSWorkspace.shared.open(url)
                 } label: {
                     Label("Open in GitLab", systemImage: "arrow.up.forward.app")
+                        .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.ink)
-                .help("Approve and merge in GitLab (⌘O)")
+                .help("Open in GitLab (⌘O)")
             }
+
+            MRActionButtons(mr: mr)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
