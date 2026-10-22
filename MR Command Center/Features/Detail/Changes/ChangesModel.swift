@@ -16,6 +16,27 @@ struct ScrollRequest: Equatable {
     let line: Int
 }
 
+/// Width rules for the Changes file list, which the user resizes by dragging its edge.
+/// The width is always a fixed frame, never a content-dependent minimum (see the AppKit
+/// layout loop gotcha in PLAN.md).
+enum FileListWidth {
+    static let standard: CGFloat = 230
+    static let minimum: CGFloat = 160
+    static let maximum: CGFloat = 520
+    /// The diff keeps at least this much room beside the list.
+    static let minimumDiffWidth: CGFloat = 360
+    /// One accessibility increment or decrement.
+    static let step: CGFloat = 20
+
+    /// The width to show for `width` (a stored preference or a drag in progress) when the
+    /// Changes area is `available` wide.
+    static func clamped(_ width: CGFloat, available: CGFloat) -> CGFloat {
+        let width = width.isNaN ? standard : width
+        let upper = max(minimum, min(maximum, available - minimumDiffWidth))
+        return min(max(width, minimum), upper)
+    }
+}
+
 /// Loads one MR's diff and tracks file selection and expansion.
 @Observable
 final class ChangesModel {

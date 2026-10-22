@@ -12,6 +12,11 @@ struct ChangesView: View {
     @AppStorage("showAIComments") private var showsAIComments = true
     /// Narrow detail column: the file list becomes a menu above the diff.
     @State private var isCompact = false
+    /// The file list's width as the user last left it; clamped to the room available.
+    @AppStorage("fileListWidth") private var fileListWidth: Double = FileListWidth.standard
+    /// The width while a drag is in progress; stored only when the drag ends.
+    @State private var draggedFileListWidth: Double?
+    @State private var changesWidth: CGFloat = 0
     /// The Changes area takes focus whenever the diff loads (including a reload for a new
     /// head SHA, which rebuilds it) so ↑/↓ move between files without a click.
     @FocusState private var isFocused: Bool
@@ -105,13 +110,20 @@ struct ChangesView: View {
                             DiffFileList(diff: diff, placement: comments.placement,
                                          aiCounts: showsAIComments ? comments.openAICountsByFile : [:],
                                          selection: $model.selectedFileID)
-                                .frame(width: 230)
-                            Divider()
+                                .frame(width: FileListWidth.clamped(draggedFileListWidth ?? fileListWidth,
+                                                                    available: changesWidth))
+                            FileListResizeHandle(width: $fileListWidth, draggedWidth: $draggedFileListWidth,
+                                                 available: changesWidth)
+                                // Above the diff, so its whole grab area takes the drag.
+                                .zIndex(1)
                             selectedFileView
                         }
                     }
                 }
-                .onGeometryChange(for: Bool.self) { $0.size.width < 640 } action: { isCompact = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                    changesWidth = width
+                    isCompact = width < 640
+                }
             }
             .focusable()
             .focusEffectDisabled()
@@ -144,6 +156,8 @@ struct ChangesView: View {
                 ContentUnavailableView("No File Selected", systemImage: "doc")
             }
         }
+        // Keep `minWidth: 0`: the measured Changes width sets the file list's width, so a
+        // content-dependent minimum here could feed back into an AppKit layout loop.
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -271,6 +285,51 @@ private struct DiffFileList: View {
                 proxy.scrollTo(id)
             }
         }
+    }
+}
+
+/// The divider between the file list and the diff. Drag it to resize the list;
+/// double-click it to go back to the standard width.
+private struct FileListResizeHandle: View {
+    @Binding var width: Double
+    @Binding var draggedWidth: Double?
+    let available: CGFloat
+
+    var body: some View {
+        Divider()
+            .overlay {
+                Color.clear
+                    .frame(width: 8)
+                    .contentShape(Rectangle())
+                    .pointerStyle(.frameResize(position: .trailing))
+                    .gesture(drag)
+                    .onTapGesture(count: 2) { width = FileListWidth.standard }
+            }
+            .accessibilityElement()
+            .accessibilityLabel("File list width")
+            .accessibilityValue("\(Int(current)) points")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: width = FileListWidth.clamped(current + FileListWidth.step, available: available)
+                case .decrement: width = FileListWidth.clamped(current - FileListWidth.step, available: available)
+                @unknown default: break
+                }
+            }
+    }
+
+    private var current: CGFloat { FileListWidth.clamped(draggedWidth ?? width, available: available) }
+
+    // Global coordinates: the handle moves with the drag, so local ones would jitter.
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { value in
+                let start = FileListWidth.clamped(width, available: available)
+                draggedWidth = FileListWidth.clamped(start + value.translation.width, available: available)
+            }
+            .onEnded { _ in
+                if let draggedWidth { width = draggedWidth }
+                draggedWidth = nil
+            }
     }
 }
 

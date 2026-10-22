@@ -153,6 +153,34 @@ struct ChangesModelTests {
         #expect(!model.handleArrow(by: 1, modifiers: modifiers.union([.function, .numericPad]), isComposing: false))
         #expect(model.selectedFileID == ids[0])
     }
+
+    @Test func fileListKeepsAStoredWidthThatFits() {
+        #expect(FileListWidth.clamped(FileListWidth.standard, available: 1000) == FileListWidth.standard)
+        #expect(FileListWidth.clamped(400, available: 1000) == 400)
+    }
+
+    @Test func fileListWidthStaysWithinItsLimits() {
+        #expect(FileListWidth.clamped(40, available: 1000) == FileListWidth.minimum)
+        #expect(FileListWidth.clamped(5000, available: 4000) == FileListWidth.maximum)
+    }
+
+    @Test func fileListLeavesRoomForTheDiff() {
+        // 700 wide: the list can take at most 700 - 360.
+        #expect(FileListWidth.clamped(500, available: 700) == 700 - FileListWidth.minimumDiffWidth)
+        // At the narrowest non-compact width the diff still gets its room.
+        let narrowest: CGFloat = 640
+        #expect(narrowest - FileListWidth.clamped(.infinity, available: narrowest) >= FileListWidth.minimumDiffWidth)
+    }
+
+    @Test func fileListNeverGoesBelowMinimumWhenSpaceIsTight() {
+        // Before the first geometry pass the available width is 0.
+        #expect(FileListWidth.clamped(FileListWidth.standard, available: 0) == FileListWidth.minimum)
+        #expect(FileListWidth.clamped(300, available: 400) == FileListWidth.minimum)
+    }
+
+    @Test func fileListFallsBackToStandardForABadStoredWidth() {
+        #expect(FileListWidth.clamped(.nan, available: 1000) == FileListWidth.standard)
+    }
 }
 
 struct DiffServiceTests {
