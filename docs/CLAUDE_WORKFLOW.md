@@ -1,18 +1,19 @@
 # Claude issue workflow
 
-Claude Code picks up GitHub issues labeled `claude`, builds them with tests, gets an independent code review from a second agent, and opens a PR. You review and merge. Claude never merges.
+Claude Code picks up GitHub issues labeled `claude`, builds them with tests, gets an independent code review from a second agent, opens a PR, and merges it once the full suite passes and the review has no Blocking findings left. Then it moves on to the next issue.
 
 ## How it works
 
 Each run (hourly, on the Mac Mini) works up to 3 issues, one after another. Each issue goes through:
 
 1. **Read the queue.** Takes the lowest numbered open issue labeled `claude` that isn't already in progress, waiting, or done.
-2. **Ask if needed.** If the issue is unclear, Claude posts numbered questions (with suggested defaults) as a comment, labels it `claude:needs-info`, and stops.
+2. **Ask if needed.** If the issue is unclear, Claude posts numbered questions (with suggested defaults) as a comment, labels it `claude:needs-info`, and moves on to the next issue.
 3. **Build it** on `claude/issue-<n>-<slug>`, with new tests.
 4. **Test everything** with the full `xcodebuild test` suite.
 5. **Independent review** by the `code-reviewer` agent, which hasn't seen the work being written.
 6. **Fix and retest** anything the review flagged.
 7. **Open a PR** and label the issue `claude:pr-open`.
+8. **Merge it** (`gh pr merge --merge --delete-branch`) if the suite passed on the final commit and no Blocking finding is left. Anything a human should still check by eye is posted on the closed issue. Otherwise the PR stays open and the issue is labeled `claude:blocked`.
 
 The run stops early when the queue is empty, when a pass fails, or when a pass finishes without taking an issue off the queue (so it never repeats one). While a run is going, the hourly trigger skips. If an issue gets stuck (tests won't pass after 3 tries), it opens a draft PR or comments, and labels the issue `claude:blocked`.
 
@@ -21,7 +22,7 @@ The run stops early when the queue is empty, when a pass fails, or when a pass f
 | `claude` | Queued | Add it when an issue is ready |
 | `claude:in-progress` | Being worked | Nothing |
 | `claude:needs-info` | Claude asked questions | Answer in a comment, then **remove this label** |
-| `claude:pr-open` | PR waiting | Review and merge (or comment) |
+| `claude:pr-open` | PR open, about to be merged | Nothing (if it stays open, see `claude:blocked`) |
 | `claude:blocked` | Stuck | Read the comment or draft PR |
 
 The pieces:
@@ -29,7 +30,7 @@ The pieces:
 - `CLAUDE.md`: project context and rules
 - `.claude/skills/work-issues/SKILL.md`: the workflow above
 - `.claude/agents/code-reviewer.md`: the reviewer
-- `.claude/settings.json`: what Claude may run unattended; force push, pushing to `main`, and `gh pr merge` are denied
+- `.claude/settings.json`: what Claude may run unattended; `gh pr merge` is allowed, while force push and pushing to `main` directly are denied
 - `scripts/claude/`: label setup, the worker script, and the launchd job
 
 ## One time setup on the Mac Mini
@@ -78,7 +79,7 @@ The pieces:
 
 ## Interactive use
 
-From any clone, `claude` then `/work-issues` runs the same workflow with you watching. Good for the first few issues.
+From any clone, `claude` then `/work-issues` runs the same workflow with you watching. It keeps going, merging each PR and asking questions where needed, until no eligible issues are left. `/work-issues once` does a single issue.
 
 ## Knobs
 
