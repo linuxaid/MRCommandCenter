@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 enum DiffLayout: String, CaseIterable, Identifiable {
     case unified, sideBySide
@@ -54,8 +55,10 @@ final class ChangesModel {
 
     /// ↑/↓ in the Changes area. Returns false to leave the key alone: while a comment box is
     /// open (the caret should move) or a modifier is held (⌥⌘↑↓ steps the MR queue).
-    func handleArrow(by offset: Int, hasModifiers: Bool, isComposing: Bool) -> Bool {
-        guard !hasModifiers, !isComposing, diff != nil else { return false }
+    /// Arrow keys always carry `.function` and `.numericPad`, so only real modifiers count.
+    func handleArrow(by offset: Int, modifiers: EventModifiers, isComposing: Bool) -> Bool {
+        let held = modifiers.intersection([.command, .option, .shift, .control])
+        guard held.isEmpty, !isComposing, diff != nil else { return false }
         moveFileSelection(by: offset)
         return true
     }

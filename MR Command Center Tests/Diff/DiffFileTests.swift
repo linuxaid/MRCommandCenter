@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import MR_Command_Center
 
@@ -75,20 +76,22 @@ struct DiffFileTests {
 }
 
 struct ChangesModelTests {
+    /// Held for the whole test so its SwiftData container outlives the loaded diff.
+    private let appModel = AppModel.testing()
+
     /// A Changes model with MR 412's four-file diff loaded (the first file is selected on load).
-    private func loaded() async throws -> (ChangesModel, [DiffFile.ID], AppModel) {
-        let appModel = AppModel.testing()
+    private func loaded() async throws -> (ChangesModel, [DiffFile.ID]) {
         await appModel.mergeRequests.refresh(.automatic)
         let mr = try #require(appModel.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
         let model = ChangesModel()
         await model.load(mr, using: appModel.diffs)
         let ids = try #require(model.diff).files.map(\.id)
         try #require(ids.count == 4)
-        return (model, ids, appModel)
+        return (model, ids)
     }
 
     @Test func downArrowMovesToTheNextFile() async throws {
-        let (model, ids, _) = try await loaded()
+        let (model, ids) = try await loaded()
         #expect(model.selectedFileID == ids[0])
         model.moveFileSelection(by: 1)
         #expect(model.selectedFileID == ids[1])
@@ -97,14 +100,14 @@ struct ChangesModelTests {
     }
 
     @Test func upArrowMovesToThePreviousFile() async throws {
-        let (model, ids, _) = try await loaded()
+        let (model, ids) = try await loaded()
         model.selectedFileID = ids[2]
         model.moveFileSelection(by: -1)
         #expect(model.selectedFileID == ids[1])
     }
 
     @Test func stopsAtEitherEnd() async throws {
-        let (model, ids, _) = try await loaded()
+        let (model, ids) = try await loaded()
         model.moveFileSelection(by: -1)
         #expect(model.selectedFileID == ids[0])
         model.selectedFileID = ids[3]
@@ -113,7 +116,7 @@ struct ChangesModelTests {
     }
 
     @Test func withNoSelectionDownPicksFirstAndUpPicksLast() async throws {
-        let (model, ids, _) = try await loaded()
+        let (model, ids) = try await loaded()
         model.selectedFileID = nil
         model.moveFileSelection(by: 1)
         #expect(model.selectedFileID == ids[0])
@@ -126,24 +129,28 @@ struct ChangesModelTests {
         let model = ChangesModel()
         model.moveFileSelection(by: 1)
         #expect(model.selectedFileID == nil)
-        #expect(!model.handleArrow(by: 1, hasModifiers: false, isComposing: false))
+        #expect(!model.handleArrow(by: 1, modifiers: [], isComposing: false))
     }
 
+    /// Plain arrow keys arrive with `.function` and `.numericPad` set; those don't count as held.
     @Test func plainArrowIsHandled() async throws {
-        let (model, ids, _) = try await loaded()
-        #expect(model.handleArrow(by: 1, hasModifiers: false, isComposing: false))
+        let (model, ids) = try await loaded()
+        #expect(model.handleArrow(by: 1, modifiers: [.function, .numericPad], isComposing: false))
         #expect(model.selectedFileID == ids[1])
-    }
-
-    @Test func arrowIsLeftToTheCommentBoxWhileComposing() async throws {
-        let (model, ids, _) = try await loaded()
-        #expect(!model.handleArrow(by: 1, hasModifiers: false, isComposing: true))
+        #expect(model.handleArrow(by: -1, modifiers: [], isComposing: false))
         #expect(model.selectedFileID == ids[0])
     }
 
-    @Test func arrowWithModifiersIsLeftAlone() async throws {
-        let (model, ids, _) = try await loaded()
-        #expect(!model.handleArrow(by: 1, hasModifiers: true, isComposing: false))
+    @Test func arrowIsLeftToTheCommentBoxWhileComposing() async throws {
+        let (model, ids) = try await loaded()
+        #expect(!model.handleArrow(by: 1, modifiers: [.function, .numericPad], isComposing: true))
+        #expect(model.selectedFileID == ids[0])
+    }
+
+    @Test(arguments: [EventModifiers.shift, .option, .control, .command, [.command, .option]])
+    func arrowWithModifiersIsLeftAlone(modifiers: EventModifiers) async throws {
+        let (model, ids) = try await loaded()
+        #expect(!model.handleArrow(by: 1, modifiers: modifiers.union([.function, .numericPad]), isComposing: false))
         #expect(model.selectedFileID == ids[0])
     }
 }

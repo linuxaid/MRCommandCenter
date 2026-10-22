@@ -12,10 +12,9 @@ struct ChangesView: View {
     @AppStorage("showAIComments") private var showsAIComments = true
     /// Narrow detail column: the file list becomes a menu above the diff.
     @State private var isCompact = false
-    /// The Changes area takes focus when it loads so ↑/↓ move between files without a click.
+    /// The Changes area takes focus whenever the diff loads (including a reload for a new
+    /// head SHA, which rebuilds it) so ↑/↓ move between files without a click.
     @FocusState private var isFocused: Bool
-    /// Focus is taken once; a reload for a new head SHA mustn't pull it back from elsewhere.
-    @State private var hasTakenFocus = false
 
     private var collapseThreshold: Int { settingsRows.first?.collapseFileDiffThresholdLines ?? 400 }
 
@@ -120,16 +119,12 @@ struct ChangesView: View {
             .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                 let handled = model.handleArrow(
                     by: press.key == .downArrow ? 1 : -1,
-                    hasModifiers: !press.modifiers.intersection([.command, .option, .shift, .control]).isEmpty,
+                    modifiers: press.modifiers,
                     isComposing: comments.activeTarget != nil
                 )
                 return handled ? .handled : .ignored
             }
-            .onAppear {
-                guard !hasTakenFocus else { return }
-                hasTakenFocus = true
-                isFocused = true
-            }
+            .onAppear { isFocused = true }
         }
     }
 
