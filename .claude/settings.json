@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodebuild *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git pull --ff-only *)",
+      "Bash(git fetch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push -u origin claude/*)",
+      "Bash(git push origin claude/*)",
+      "Bash(gh issue list *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh label list *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr create *)",
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git pull --ff-only)",
+      "Bash(gh label list)",
+      "Bash(tail *)",
+      "Bash(ls *)",
+      "Read",
+      "Edit",
+      "Write"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push origin main *)",
+      "Bash(git push origin main)",
+      "Bash(git push * main)",
+      "Bash(git reset --hard *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh repo *)",
+      "Bash(security *)",
+      "Bash(rm -rf *)",
+      "Read(~/Library/Containers/**)",
+      "Read(~/Library/Keychains/**)"
+    ]
+  }
+}
