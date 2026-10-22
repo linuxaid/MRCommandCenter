@@ -45,10 +45,10 @@ struct ActivityView: View {
                                     ActivityLine(event: event, showsMR: true)
                                         .padding(.horizontal, 14)
                                         .contentShape(.rect)
-                                        .background(appModel.mergeRequests.selectedKey == event.mrKey ? Theme.sunken : .clear)
+                                        .background(isSelected(event) ? Theme.sunken : .clear)
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(appModel.mergeRequests.mergeRequest(forKey: event.mrKey) == nil)
+                                .disabled(!appModel.mergeRequests.canOpenActivity(forKey: event.mrKey))
                                 if event.id != dayEvents.last?.id { Divider().padding(.leading, 42) }
                             }
                         }
@@ -63,8 +63,14 @@ struct ActivityView: View {
         .background(Theme.canvas)
     }
 
+    /// Open MRs show their brief; merged or closed ones open read only.
     private func select(_ event: ActivityEvent) {
-        appModel.mergeRequests.selectedKey = event.mrKey
+        appModel.mergeRequests.selectActivity(forKey: event.mrKey)
+    }
+
+    private func isSelected(_ event: ActivityEvent) -> Bool {
+        let store = appModel.mergeRequests
+        return store.selectedKey == event.mrKey || store.selectedPastKey == event.mrKey
     }
 
     private func dayTitle(_ day: Date) -> String {

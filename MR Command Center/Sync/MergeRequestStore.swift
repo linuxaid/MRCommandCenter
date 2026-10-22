@@ -33,7 +33,14 @@ final class MergeRequestStore {
     private(set) var trackedMergeRequests: [TrackedMR] = []
     /// Your GitLab username, once known.
     private(set) var username: String?
-    var selectedKey: String?
+    var selectedKey: String? {
+        didSet { if selectedKey != nil { selectedPastKey = nil } }
+    }
+    /// A merged or closed MR picked from Activity. It's shown read only, from the last
+    /// snapshot taken before it left your list. Picking an open MR clears it.
+    var selectedPastKey: String? {
+        didSet { if selectedPastKey != nil { selectedKey = nil } }
+    }
     private(set) var isRefreshing = false
     private(set) var problem: RefreshProblem?
     private(set) var lastRefreshedAt: Date?
@@ -62,6 +69,31 @@ final class MergeRequestStore {
 
     func mergeRequest(forKey key: String) -> TrackedMR? {
         trackedMergeRequests.first { $0.key == key }
+    }
+
+    var selectedPast: TrackedMR? {
+        selectedPastKey.flatMap(pastMergeRequest(forKey:))
+    }
+
+    /// The saved snapshot of an MR that's no longer open, or nil if it's still in your list.
+    func pastMergeRequest(forKey key: String) -> TrackedMR? {
+        var descriptor = FetchDescriptor<TrackedMR>(predicate: #Predicate { $0.key == key && !$0.isInReviewerList })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
+    }
+
+    /// Whether an Activity row for this MR can be opened: it's open, or a snapshot of it is saved.
+    func canOpenActivity(forKey key: String) -> Bool {
+        mergeRequest(forKey: key) != nil || pastMergeRequest(forKey: key) != nil
+    }
+
+    /// Opens an Activity row: the brief for an open MR, the read-only view for a past one.
+    func selectActivity(forKey key: String) {
+        if mergeRequest(forKey: key) != nil {
+            selectedKey = key
+        } else if pastMergeRequest(forKey: key) != nil {
+            selectedPastKey = key
+        }
     }
 
     /// Marks the MR's activity as seen.
@@ -396,7 +428,7 @@ final class MergeRequestStore {
     }
 
     func openSelectedInBrowser() {
-        guard let url = selected.flatMap({ URL(string: $0.webURL) }) else { return }
+        guard let url = (selected ?? selectedPast).flatMap({ URL(string: $0.webURL) }) else { return }
         NSWorkspace.shared.open(url)
     }
 }

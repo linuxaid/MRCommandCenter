@@ -48,7 +48,10 @@ enum Destination: Hashable {
 /// and the automatic merges they trigger.
 @Observable
 final class CommandCenter {
-    var destination: Destination = .briefing
+    var destination: Destination = .briefing {
+        // Merged or closed MRs are only reachable from Activity.
+        didSet { if destination != .activity { store.selectedPastKey = nil } }
+    }
     /// The rule being edited on the Rules page.
     var selectedRuleID: UUID?
     private(set) var rules: [MergeRule] = []

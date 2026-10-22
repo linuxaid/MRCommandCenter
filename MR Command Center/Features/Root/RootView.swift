@@ -100,6 +100,9 @@ struct RootView: View {
         } else if let mr = store.selected {
             BriefPanel(mr: mr)
                 .id(mr.key)
+        } else if let mr = store.selectedPast {
+            PastMRPanel(mr: mr)
+                .id(mr.key)
         } else {
             ContentUnavailableView("Pick a Merge Request", systemImage: "text.page",
                                    description: Text("Its brief shows what's happening, what it needs, and who has to act."))
