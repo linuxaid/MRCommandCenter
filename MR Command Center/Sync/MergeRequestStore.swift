@@ -71,6 +71,7 @@ final class MergeRequestStore {
         trackedMergeRequests.first { $0.key == key }
     }
 
+    /// Fetches on every read; fine for the detail column, not for per-row checks.
     var selectedPast: TrackedMR? {
         selectedPastKey.flatMap(pastMergeRequest(forKey:))
     }
@@ -435,8 +436,13 @@ final class MergeRequestStore {
         self.selectedKey = order[min(max(index + offset, 0), order.count - 1)]
     }
 
+    /// The GitLab page ⌘O opens: the selected open MR, or the merged or closed one picked in Activity.
+    var browserURL: URL? {
+        (selected ?? selectedPast).flatMap { URL(string: $0.webURL) }
+    }
+
     func openSelectedInBrowser() {
-        guard let url = (selected ?? selectedPast).flatMap({ URL(string: $0.webURL) }) else { return }
+        guard let url = browserURL else { return }
         NSWorkspace.shared.open(url)
     }
 }

@@ -34,6 +34,7 @@ struct PastMergeRequestTests {
         let past = try #require(store.selectedPast)
         #expect(past.iid == 77)
         #expect(!past.webURL.isEmpty, "The GitLab link is kept")
+        #expect(store.browserURL == URL(string: past.webURL), "⌘O opens it")
     }
 
     @Test func openMRFromActivityStillOpensItsBrief() async throws {
@@ -54,6 +55,7 @@ struct PastMergeRequestTests {
         #expect(openable.count == 11, "Every open MR")
         store.selectActivity(forKey: "nope")
         #expect(store.selectedKey == nil && store.selectedPastKey == nil)
+        #expect(store.browserURL == nil, "⌘O has nothing to open")
     }
 
     @Test func pickingAnOpenMRClearsThePastOneAndViceVersa() async throws {

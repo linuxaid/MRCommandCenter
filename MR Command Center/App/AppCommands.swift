@@ -28,7 +28,7 @@ struct AppCommands: Commands {
 
             Button("Open in GitLab") { store.openSelectedInBrowser() }
                 .keyboardShortcut("o", modifiers: .command)
-                .disabled(store.selected == nil && store.selectedPast == nil)
+                .disabled(store.browserURL == nil)
 
             Button(appModel.isReviewing ? "Back to Briefing" : "Review Here") {
                 if appModel.isReviewing {

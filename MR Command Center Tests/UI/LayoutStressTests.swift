@@ -62,6 +62,32 @@ struct LayoutStressTests {
         #expect(minimum <= 1000, "Window minimum should fit a laptop screen, was \(minimum)")
     }
 
+    /// The read-only panel for a merged MR, opened from Activity, sits in the detail column too.
+    @Test func resizingWithAMergedMROpenFromActivityDoesNotLoop() async throws {
+        let spy = SpyGitLabClient()
+        let model = AppModel.testing(gitLab: spy)
+        await model.mergeRequests.refresh(.automatic)
+        let key = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 77 }).key
+        spy.edit { $0.data.entries.removeAll { $0.detail.iid == 77 } }
+        await model.mergeRequests.refresh(.automatic)
+        model.commandCenter.destination = .activity
+        model.mergeRequests.selectActivity(forKey: key)
+        try #require(model.mergeRequests.selectedPast != nil)
+
+        let window = try await host(RootView().environment(model).modelContainer(model.modelContainer), width: 1400)
+        defer { window.orderOut(nil) }
+
+        for width in [1100, 900, 700, 500, 1400] {
+            window.setContentSize(NSSize(width: width, height: 800))
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        window.setContentSize(NSSize(width: 300, height: 800))
+        try await Task.sleep(for: .milliseconds(300))
+
+        let minimum = window.contentLayoutRect.width
+        #expect(minimum <= 1000, "Window minimum should fit a laptop screen, was \(minimum)")
+    }
+
     /// A widened file list must clamp, then switch to the compact picker, as the window narrows.
     @Test func narrowingChangesWithAWideFileListDoesNotLoop() async throws {
         let defaults = UserDefaults.standard
