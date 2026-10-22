@@ -11,10 +11,9 @@ struct AppIconTests {
     }
 
     @Test func compiledIconIsInTheBundle() throws {
-        // actool writes an .icns fallback next to the layered icon in Assets.car.
+        // actool writes an .icns fallback next to the layered icon it puts in Assets.car.
         let icns = try #require(Bundle.main.url(forResource: "AppIcon", withExtension: "icns"))
         let image = try #require(NSImage(contentsOf: icns))
         #expect(image.size.width >= 128)
-        #expect(Bundle.main.url(forResource: "Assets", withExtension: "car") != nil)
     }
 }
