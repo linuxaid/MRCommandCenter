@@ -74,6 +74,80 @@ struct DiffFileTests {
     }
 }
 
+struct ChangesModelTests {
+    /// A Changes model with MR 412's four-file diff loaded (the first file is selected on load).
+    private func loaded() async throws -> (ChangesModel, [DiffFile.ID], AppModel) {
+        let appModel = AppModel.testing()
+        await appModel.mergeRequests.refresh(.automatic)
+        let mr = try #require(appModel.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
+        let model = ChangesModel()
+        await model.load(mr, using: appModel.diffs)
+        let ids = try #require(model.diff).files.map(\.id)
+        try #require(ids.count == 4)
+        return (model, ids, appModel)
+    }
+
+    @Test func downArrowMovesToTheNextFile() async throws {
+        let (model, ids, _) = try await loaded()
+        #expect(model.selectedFileID == ids[0])
+        model.moveFileSelection(by: 1)
+        #expect(model.selectedFileID == ids[1])
+        model.moveFileSelection(by: 1)
+        #expect(model.selectedFileID == ids[2])
+    }
+
+    @Test func upArrowMovesToThePreviousFile() async throws {
+        let (model, ids, _) = try await loaded()
+        model.selectedFileID = ids[2]
+        model.moveFileSelection(by: -1)
+        #expect(model.selectedFileID == ids[1])
+    }
+
+    @Test func stopsAtEitherEnd() async throws {
+        let (model, ids, _) = try await loaded()
+        model.moveFileSelection(by: -1)
+        #expect(model.selectedFileID == ids[0])
+        model.selectedFileID = ids[3]
+        model.moveFileSelection(by: 1)
+        #expect(model.selectedFileID == ids[3])
+    }
+
+    @Test func withNoSelectionDownPicksFirstAndUpPicksLast() async throws {
+        let (model, ids, _) = try await loaded()
+        model.selectedFileID = nil
+        model.moveFileSelection(by: 1)
+        #expect(model.selectedFileID == ids[0])
+        model.selectedFileID = nil
+        model.moveFileSelection(by: -1)
+        #expect(model.selectedFileID == ids[3])
+    }
+
+    @Test func doesNothingBeforeTheDiffLoads() {
+        let model = ChangesModel()
+        model.moveFileSelection(by: 1)
+        #expect(model.selectedFileID == nil)
+        #expect(!model.handleArrow(by: 1, hasModifiers: false, isComposing: false))
+    }
+
+    @Test func plainArrowIsHandled() async throws {
+        let (model, ids, _) = try await loaded()
+        #expect(model.handleArrow(by: 1, hasModifiers: false, isComposing: false))
+        #expect(model.selectedFileID == ids[1])
+    }
+
+    @Test func arrowIsLeftToTheCommentBoxWhileComposing() async throws {
+        let (model, ids, _) = try await loaded()
+        #expect(!model.handleArrow(by: 1, hasModifiers: false, isComposing: true))
+        #expect(model.selectedFileID == ids[0])
+    }
+
+    @Test func arrowWithModifiersIsLeftAlone() async throws {
+        let (model, ids, _) = try await loaded()
+        #expect(!model.handleArrow(by: 1, hasModifiers: true, isComposing: false))
+        #expect(model.selectedFileID == ids[0])
+    }
+}
+
 struct DiffServiceTests {
     @Test func fetchesOncePerHeadSHA() async throws {
         let spy = SpyGitLabClient()

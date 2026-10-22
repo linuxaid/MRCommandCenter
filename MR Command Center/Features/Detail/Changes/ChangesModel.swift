@@ -41,6 +41,25 @@ final class ChangesModel {
         return true
     }
 
+    /// Moves the file selection up (negative) or down the list, stopping at either end.
+    /// With nothing selected, down picks the first file and up the last.
+    func moveFileSelection(by offset: Int) {
+        guard let files = diff?.files, !files.isEmpty else { return }
+        guard let index = files.firstIndex(where: { $0.id == selectedFileID }) else {
+            selectedFileID = offset > 0 ? files.first?.id : files.last?.id
+            return
+        }
+        selectedFileID = files[min(max(index + offset, 0), files.count - 1)].id
+    }
+
+    /// ↑/↓ in the Changes area. Returns false to leave the key alone: while a comment box is
+    /// open (the caret should move) or a modifier is held (⌥⌘↑↓ steps the MR queue).
+    func handleArrow(by offset: Int, hasModifiers: Bool, isComposing: Bool) -> Bool {
+        guard !hasModifiers, !isComposing, diff != nil else { return false }
+        moveFileSelection(by: offset)
+        return true
+    }
+
     var diff: MRDiff? {
         if case .loaded(let diff) = phase { return diff }
         return nil
