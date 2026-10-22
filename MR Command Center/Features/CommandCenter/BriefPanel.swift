@@ -507,7 +507,7 @@ private struct ContextCard: View {
 }
 
 /// The last few things that happened to this MR.
-private struct RecentActivity: View {
+struct RecentActivity: View {
     @Query private var events: [ActivityEvent]
 
     init(mrKey: String) {

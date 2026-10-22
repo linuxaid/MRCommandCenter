@@ -33,7 +33,14 @@ final class MergeRequestStore {
     private(set) var trackedMergeRequests: [TrackedMR] = []
     /// Your GitLab username, once known.
     private(set) var username: String?
-    var selectedKey: String?
+    var selectedKey: String? {
+        didSet { if selectedKey != nil { selectedPastKey = nil } }
+    }
+    /// A merged or closed MR picked from Activity. It's shown read only, from the last
+    /// snapshot taken before it left your list. Picking an open MR clears it.
+    var selectedPastKey: String? {
+        didSet { if selectedPastKey != nil { selectedKey = nil } }
+    }
     private(set) var isRefreshing = false
     private(set) var problem: RefreshProblem?
     private(set) var lastRefreshedAt: Date?
@@ -64,6 +71,36 @@ final class MergeRequestStore {
         trackedMergeRequests.first { $0.key == key }
     }
 
+    /// Fetches on every read; fine for the detail column, not for per-row checks.
+    var selectedPast: TrackedMR? {
+        selectedPastKey.flatMap(pastMergeRequest(forKey:))
+    }
+
+    /// The saved snapshot of an MR that's no longer open, or nil if it's still in your list.
+    func pastMergeRequest(forKey key: String) -> TrackedMR? {
+        var descriptor = FetchDescriptor<TrackedMR>(predicate: #Predicate { $0.key == key && !$0.isInReviewerList })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor))?.first
+    }
+
+    /// Keys of every MR an Activity row can open: open ones plus saved snapshots of past ones.
+    /// One fetch, so Activity can check each of its rows against it.
+    func openableActivityKeys() -> Set<String> {
+        var descriptor = FetchDescriptor<TrackedMR>(predicate: #Predicate { !$0.isInReviewerList })
+        descriptor.propertiesToFetch = [\.key]
+        let past = (try? context.fetch(descriptor))?.map(\.key) ?? []
+        return Set(trackedMergeRequests.map(\.key)).union(past)
+    }
+
+    /// Opens an Activity row: the brief for an open MR, the read-only view for a past one.
+    func selectActivity(forKey key: String) {
+        if mergeRequest(forKey: key) != nil {
+            selectedKey = key
+        } else if pastMergeRequest(forKey: key) != nil {
+            selectedPastKey = key
+        }
+    }
+
     /// Marks the MR's activity as seen.
     func markSeen(_ mr: TrackedMR) {
         guard mr.hasUnseenActivity else { return }
@@ -83,6 +120,10 @@ final class MergeRequestStore {
         }
         if let selectedKey, !trackedMergeRequests.contains(where: { $0.key == selectedKey }) {
             self.selectedKey = nil
+        }
+        // A past MR that's back in the list (reopened, or you were added again) is open now.
+        if let selectedPastKey, trackedMergeRequests.contains(where: { $0.key == selectedPastKey }) {
+            selectedKey = selectedPastKey
         }
     }
 
@@ -395,8 +436,13 @@ final class MergeRequestStore {
         self.selectedKey = order[min(max(index + offset, 0), order.count - 1)]
     }
 
+    /// The GitLab page ⌘O opens: the selected open MR, or the merged or closed one picked in Activity.
+    var browserURL: URL? {
+        (selected ?? selectedPast).flatMap { URL(string: $0.webURL) }
+    }
+
     func openSelectedInBrowser() {
-        guard let url = selected.flatMap({ URL(string: $0.webURL) }) else { return }
+        guard let url = browserURL else { return }
         NSWorkspace.shared.open(url)
     }
 }

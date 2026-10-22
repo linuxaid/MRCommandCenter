@@ -9,6 +9,7 @@ struct ActivityView: View {
 
     var body: some View {
         let shown = onlyAutomation ? events.filter { [.autoMerged, .autoMergeFailed, .autoMergeWouldMerge].contains($0.kind) } : events
+        let openable = appModel.mergeRequests.openableActivityKeys()
         let days = Dictionary(grouping: shown) { Calendar.current.startOfDay(for: $0.date) }
             .sorted { $0.key > $1.key }
 
@@ -45,10 +46,10 @@ struct ActivityView: View {
                                     ActivityLine(event: event, showsMR: true)
                                         .padding(.horizontal, 14)
                                         .contentShape(.rect)
-                                        .background(appModel.mergeRequests.selectedKey == event.mrKey ? Theme.sunken : .clear)
+                                        .background(isSelected(event) ? Theme.sunken : .clear)
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(appModel.mergeRequests.mergeRequest(forKey: event.mrKey) == nil)
+                                .disabled(!openable.contains(event.mrKey))
                                 if event.id != dayEvents.last?.id { Divider().padding(.leading, 42) }
                             }
                         }
@@ -63,8 +64,14 @@ struct ActivityView: View {
         .background(Theme.canvas)
     }
 
+    /// Open MRs show their brief; merged or closed ones open read only.
     private func select(_ event: ActivityEvent) {
-        appModel.mergeRequests.selectedKey = event.mrKey
+        appModel.mergeRequests.selectActivity(forKey: event.mrKey)
+    }
+
+    private func isSelected(_ event: ActivityEvent) -> Bool {
+        let store = appModel.mergeRequests
+        return store.selectedKey == event.mrKey || store.selectedPastKey == event.mrKey
     }
 
     private func dayTitle(_ day: Date) -> String {
