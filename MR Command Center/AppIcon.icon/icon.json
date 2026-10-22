@@ -1,0 +1,75 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.85098,0.28235,0.05882,1.00000",
+      "srgb:0.72157,0.22745,0.03922,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "name": "Ready card",
+      "layers": [
+        {
+          "image-name": "check.svg",
+          "name": "check"
+        },
+        {
+          "image-name": "title.svg",
+          "name": "title",
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "subtitle.svg",
+          "name": "subtitle"
+        },
+        {
+          "image-name": "card-front.svg",
+          "name": "card-front"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    },
+    {
+      "name": "Queue",
+      "layers": [
+        {
+          "image-name": "card-middle.svg",
+          "name": "card-middle",
+          "opacity": 0.7
+        },
+        {
+          "image-name": "card-back.svg",
+          "name": "card-back",
+          "opacity": 0.45
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.3
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
