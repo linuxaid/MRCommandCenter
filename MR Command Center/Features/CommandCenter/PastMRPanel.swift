@@ -1,25 +1,24 @@
-import AppKit
 import SwiftUI
 
 /// A merged or closed MR opened from Activity, read only: what it was, what happened to it,
 /// and a way back to GitLab (to comment there, for example). Nothing here acts on the MR.
 struct PastMRPanel: View {
     let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header
-                if let url = URL(string: mr.webURL) {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Label("Open in GitLab", systemImage: "arrow.up.forward.app")
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.borderedProminent)
-                    .help("Open in GitLab (⌘O)")
+                Button {
+                    appModel.mergeRequests.openSelectedInBrowser()
+                } label: {
+                    Label("Open in GitLab", systemImage: "arrow.up.forward.app")
                 }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .disabled(URL(string: mr.webURL) == nil)
+                .help("Open in GitLab (⌘O)")
                 if !description.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("DESCRIPTION").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
@@ -46,7 +45,7 @@ struct PastMRPanel: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Merged or closed", systemImage: "checkmark.seal")
+                Label("Merged or closed", systemImage: "archivebox")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.inkSecondary)
                     .padding(.horizontal, 8).padding(.vertical, 3)

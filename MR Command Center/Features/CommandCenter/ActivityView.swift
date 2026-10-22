@@ -9,6 +9,7 @@ struct ActivityView: View {
 
     var body: some View {
         let shown = onlyAutomation ? events.filter { [.autoMerged, .autoMergeFailed, .autoMergeWouldMerge].contains($0.kind) } : events
+        let openable = appModel.mergeRequests.openableActivityKeys()
         let days = Dictionary(grouping: shown) { Calendar.current.startOfDay(for: $0.date) }
             .sorted { $0.key > $1.key }
 
@@ -48,7 +49,7 @@ struct ActivityView: View {
                                         .background(isSelected(event) ? Theme.sunken : .clear)
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(!appModel.mergeRequests.canOpenActivity(forKey: event.mrKey))
+                                .disabled(!openable.contains(event.mrKey))
                                 if event.id != dayEvents.last?.id { Divider().padding(.leading, 42) }
                             }
                         }

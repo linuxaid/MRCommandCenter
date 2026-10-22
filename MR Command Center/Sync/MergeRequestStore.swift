@@ -82,9 +82,13 @@ final class MergeRequestStore {
         return (try? context.fetch(descriptor))?.first
     }
 
-    /// Whether an Activity row for this MR can be opened: it's open, or a snapshot of it is saved.
-    func canOpenActivity(forKey key: String) -> Bool {
-        mergeRequest(forKey: key) != nil || pastMergeRequest(forKey: key) != nil
+    /// Keys of every MR an Activity row can open: open ones plus saved snapshots of past ones.
+    /// One fetch, so Activity can check each of its rows against it.
+    func openableActivityKeys() -> Set<String> {
+        var descriptor = FetchDescriptor<TrackedMR>(predicate: #Predicate { !$0.isInReviewerList })
+        descriptor.propertiesToFetch = [\.key]
+        let past = (try? context.fetch(descriptor))?.map(\.key) ?? []
+        return Set(trackedMergeRequests.map(\.key)).union(past)
     }
 
     /// Opens an Activity row: the brief for an open MR, the read-only view for a past one.
@@ -115,6 +119,10 @@ final class MergeRequestStore {
         }
         if let selectedKey, !trackedMergeRequests.contains(where: { $0.key == selectedKey }) {
             self.selectedKey = nil
+        }
+        // A past MR that's back in the list (reopened, or you were added again) is open now.
+        if let selectedPastKey, trackedMergeRequests.contains(where: { $0.key == selectedPastKey }) {
+            selectedKey = selectedPastKey
         }
     }
 

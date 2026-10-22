@@ -24,7 +24,7 @@ struct PastMergeRequestTests {
     @Test func mergedMRCanBeOpenedFromActivityReadOnly() async throws {
         let key = try await mergeOne()
         #expect(store.mergeRequest(forKey: key) == nil, "It's no longer in the open list")
-        #expect(store.canOpenActivity(forKey: key))
+        #expect(store.openableActivityKeys().contains(key))
 
         store.selectActivity(forKey: key)
 
@@ -49,7 +49,9 @@ struct PastMergeRequestTests {
 
     @Test func unknownMRCantBeOpened() async throws {
         await store.refresh(.automatic)
-        #expect(!store.canOpenActivity(forKey: "nope"))
+        let openable = store.openableActivityKeys()
+        #expect(!openable.contains("nope"))
+        #expect(openable.count == 11, "Every open MR")
         store.selectActivity(forKey: "nope")
         #expect(store.selectedKey == nil && store.selectedPastKey == nil)
     }
@@ -72,6 +74,7 @@ struct PastMergeRequestTests {
         app.commandCenter.destination = .activity
         store.selectActivity(forKey: key)
 
+        // Setting Activity again (the sidebar does) keeps the selection.
         app.commandCenter.destination = .activity
         #expect(store.selectedPastKey == key)
 
@@ -87,5 +90,16 @@ struct PastMergeRequestTests {
         #expect(store.pastMergeRequest(forKey: key) == nil)
         store.selectActivity(forKey: key)
         #expect(store.selectedKey == key)
+    }
+
+    @Test func selectedPastMRThatReopensBecomesTheOpenSelection() async throws {
+        let key = try await mergeOne()
+        store.selectActivity(forKey: key)
+
+        spy.edit { $0.data = MockGitLabData.sample }
+        await store.refresh(.automatic)
+
+        #expect(store.selectedKey == key)
+        #expect(store.selectedPastKey == nil)
     }
 }
