@@ -62,6 +62,33 @@ struct LayoutStressTests {
         #expect(minimum <= 1000, "Window minimum should fit a laptop screen, was \(minimum)")
     }
 
+    /// A widened file list must clamp, then switch to the compact picker, as the window narrows.
+    @Test func narrowingChangesWithAWideFileListDoesNotLoop() async throws {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "fileListWidth")
+        defaults.set(Double(FileListWidth.maximum), forKey: "fileListWidth")
+        defer { defaults.set(previous, forKey: "fileListWidth") }
+
+        let model = AppModel.testing()
+        await model.mergeRequests.refresh(.automatic)
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
+        model.review(mr)
+        model.detailTab = .changes
+
+        let window = try await host(RootView().environment(model).modelContainer(model.modelContainer), width: 1400)
+        defer { window.orderOut(nil) }
+
+        for width in [1100, 900, 800, 700, 500, 1400] {
+            window.setContentSize(NSSize(width: width, height: 800))
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        window.setContentSize(NSSize(width: 300, height: 800))
+        try await Task.sleep(for: .milliseconds(300))
+
+        let minimum = window.contentLayoutRect.width
+        #expect(minimum <= 1000, "Window minimum should fit a laptop screen, was \(minimum)")
+    }
+
     private func host(_ view: some View, width: CGFloat) async throws -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 800),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
