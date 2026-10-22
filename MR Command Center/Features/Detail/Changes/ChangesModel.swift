@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 enum DiffLayout: String, CaseIterable, Identifiable {
     case unified, sideBySide
@@ -38,6 +39,27 @@ final class ChangesModel {
         selectedFileID = file.id
         expandedFileIDs.insert(file.id)
         scrollRequest = ScrollRequest(fileID: file.id, line: line)
+        return true
+    }
+
+    /// Moves the file selection up (negative) or down the list, stopping at either end.
+    /// With nothing selected, down picks the first file and up the last.
+    func moveFileSelection(by offset: Int) {
+        guard let files = diff?.files, !files.isEmpty else { return }
+        guard let index = files.firstIndex(where: { $0.id == selectedFileID }) else {
+            selectedFileID = offset > 0 ? files.first?.id : files.last?.id
+            return
+        }
+        selectedFileID = files[min(max(index + offset, 0), files.count - 1)].id
+    }
+
+    /// ↑/↓ in the Changes area. Returns false to leave the key alone: while a comment box is
+    /// open (the caret should move) or a modifier is held (⌥⌘↑↓ steps the MR queue).
+    /// Arrow keys always carry `.function` and `.numericPad`, so only real modifiers count.
+    func handleArrow(by offset: Int, modifiers: EventModifiers, isComposing: Bool) -> Bool {
+        let held = modifiers.intersection([.command, .option, .shift, .control])
+        guard held.isEmpty, !isComposing, diff != nil else { return false }
+        moveFileSelection(by: offset)
         return true
     }
 

@@ -12,6 +12,9 @@ struct ChangesView: View {
     @AppStorage("showAIComments") private var showsAIComments = true
     /// Narrow detail column: the file list becomes a menu above the diff.
     @State private var isCompact = false
+    /// The Changes area takes focus whenever the diff loads (including a reload for a new
+    /// head SHA, which rebuilds it) so ↑/↓ move between files without a click.
+    @FocusState private var isFocused: Bool
 
     private var collapseThreshold: Int { settingsRows.first?.collapseFileDiffThresholdLines ?? 400 }
 
@@ -110,6 +113,18 @@ struct ChangesView: View {
                 }
                 .onGeometryChange(for: Bool.self) { $0.size.width < 640 } action: { isCompact = $0 }
             }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($isFocused)
+            .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+                let handled = model.handleArrow(
+                    by: press.key == .downArrow ? 1 : -1,
+                    modifiers: press.modifiers,
+                    isComposing: comments.activeTarget != nil
+                )
+                return handled ? .handled : .ignored
+            }
+            .onAppear { isFocused = true }
         }
     }
 
@@ -233,20 +248,27 @@ private struct DiffFileList: View {
     @Binding var selection: DiffFile.ID?
 
     var body: some View {
-        List(selection: $selection) {
-            Section {
-                ForEach(diff.files) { file in
-                    let threads = placement.threads(for: file.id)
-                    DiffFileRow(file: file, threadCount: threads.count, unresolvedCount: threads.unresolvedCount,
-                                aiCount: aiCounts[file.id] ?? 0)
-                        .tag(file.id)
+        ScrollViewReader { proxy in
+            List(selection: $selection) {
+                Section {
+                    ForEach(diff.files) { file in
+                        let threads = placement.threads(for: file.id)
+                        DiffFileRow(file: file, threadCount: threads.count, unresolvedCount: threads.unresolvedCount,
+                                    aiCount: aiCounts[file.id] ?? 0)
+                            .tag(file.id)
+                    }
+                } header: {
+                    HStack {
+                        Text("\(diff.files.count) \(diff.files.count == 1 ? "file" : "files")")
+                        Spacer()
+                        DiffStat(additions: diff.additions, deletions: diff.deletions)
+                    }
                 }
-            } header: {
-                HStack {
-                    Text("\(diff.files.count) \(diff.files.count == 1 ? "file" : "files")")
-                    Spacer()
-                    DiffStat(additions: diff.additions, deletions: diff.deletions)
-                }
+            }
+            // Keep the row in view when the arrow keys move the selection past the visible files.
+            .onChange(of: selection, initial: true) { _, id in
+                guard let id else { return }
+                proxy.scrollTo(id)
             }
         }
     }
