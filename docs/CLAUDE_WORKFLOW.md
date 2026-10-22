@@ -4,7 +4,7 @@ Claude Code picks up GitHub issues labeled `claude`, builds them with tests, get
 
 ## How it works
 
-Each run (hourly, on the Mac Mini):
+Each run (hourly, on the Mac Mini) works up to 3 issues, one after another. Each issue goes through:
 
 1. **Read the queue.** Takes the lowest numbered open issue labeled `claude` that isn't already in progress, waiting, or done.
 2. **Ask if needed.** If the issue is unclear, Claude posts numbered questions (with suggested defaults) as a comment, labels it `claude:needs-info`, and stops.
@@ -14,7 +14,7 @@ Each run (hourly, on the Mac Mini):
 6. **Fix and retest** anything the review flagged.
 7. **Open a PR** and label the issue `claude:pr-open`.
 
-One issue per run. If it gets stuck (tests won't pass after 3 tries), it opens a draft PR or comments, and labels the issue `claude:blocked`.
+The run stops early when the queue is empty, when a pass fails, or when a pass finishes without taking an issue off the queue (so it never repeats one). While a run is going, the hourly trigger skips. If an issue gets stuck (tests won't pass after 3 tries), it opens a draft PR or comments, and labels the issue `claude:blocked`.
 
 | Label | Meaning | Your move |
 | --- | --- | --- |
@@ -82,7 +82,8 @@ From any clone, `claude` then `/work-issues` runs the same workflow with you wat
 
 ## Knobs
 
-- **Spend cap per run:** `CLAUDE_WORKER_MAX_BUDGET_USD` (default 10).
+- **Issues per run:** `CLAUDE_WORKER_MAX_ISSUES` (default 3). Issues are worked one at a time, not in parallel.
+- **Spend cap per issue:** `CLAUDE_WORKER_MAX_BUDGET_USD` (default 10), so a run can spend up to `MAX_ISSUES` times this.
 - **Frequency:** `StartInterval` in the plist (seconds).
 - **What Claude may run:** `.claude/settings.json`. Unattended runs use `--permission-mode dontAsk`, so anything not on the allow list is denied rather than prompted.
 - **Pulling in worker updates:** the worker clone pulls `main` at the start of every run, so merged changes to the skill or settings take effect automatically.
