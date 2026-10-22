@@ -42,6 +42,11 @@ struct RootView: View {
                     Banner(message: warning, systemImage: "exclamationmark.triangle", style: .warning)
                 }
                 problemBanner
+                ForEach(center.mergeFailures) { failure in
+                    Banner(message: "Couldn't merge \(failure.reference) “\(failure.title)”: \(failure.message)",
+                           systemImage: "xmark.octagon", style: .error, actionTitle: "Show",
+                           action: { show(failure) }, dismiss: { center.dismissMergeFailure(failure) })
+                }
             }
         }
         .task {
@@ -107,6 +112,13 @@ struct RootView: View {
             ContentUnavailableView("Pick a Merge Request", systemImage: "text.page",
                                    description: Text("Its brief shows what's happening, what it needs, and who has to act."))
         }
+    }
+
+    /// Opens the MR whose merge failed; its brief has the same error.
+    private func show(_ failure: MergeFailure) {
+        center.dismissMergeFailure(failure)
+        store.selectedKey = failure.mrKey
+        if case .rules = center.destination { center.destination = .briefing }
     }
 
     @ViewBuilder

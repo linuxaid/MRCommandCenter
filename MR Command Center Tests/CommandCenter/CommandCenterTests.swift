@@ -428,3 +428,99 @@ struct ManualActionTests {
         #expect(app.commandCenter.situation(for: terraform).lane == .autoMerge)
     }
 }
+
+/// Issue #8: merging doesn't hold you in the dialog; failures come back as a banner.
+@MainActor
+struct BackgroundMergeTests {
+    private func loaded() async -> (AppModel, SpyGitLabClient) {
+        let spy = SpyGitLabClient()
+        let app = AppModel.testing(gitLab: spy)
+        await app.refresh(.automatic)
+        return (app, spy)
+    }
+
+    private func draft(_ app: AppModel, _ iid: Int) throws -> MergeDraft {
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == iid })
+        app.commandCenter.requestMerge(mr)
+        return try #require(app.commandCenter.mergeDraft)
+    }
+
+    @Test func startReturnsBeforeGitLabAnswersAndTheMergeFinishesOnItsOwn() async throws {
+        let (app, spy) = await loaded()
+        let draft = try draft(app, 233)
+
+        let task = try #require(app.commandCenter.startMerge(draft), "The dialog can close")
+        #expect(spy.count("merge") == 0, "Nothing has been sent yet when start returns")
+
+        await task.value
+        #expect(spy.count("merge") == 1)
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 })
+        #expect(app.commandCenter.mergeFailures.isEmpty)
+        #expect(!app.commandCenter.mergingKeys.contains(draft.mrKey))
+    }
+
+    @Test func aFailedMergeIsReportedAsABanner() async throws {
+        let (app, spy) = await loaded()
+        spy.edit { $0.mergeFailure = .server(status: 405) }
+        let draft = try draft(app, 233)
+
+        await app.commandCenter.startMerge(draft)?.value
+
+        let failure = try #require(app.commandCenter.mergeFailures.first)
+        #expect(failure.mrKey == draft.mrKey)
+        #expect(failure.reference == draft.reference)
+        #expect(failure.message.contains("405"))
+        #expect(app.commandCenter.actionErrors[draft.mrKey] == failure.message, "The brief shows it too")
+        #expect(app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 }, "Still open")
+    }
+
+    @Test func dismissingRemovesTheBanner() async throws {
+        let (app, spy) = await loaded()
+        spy.edit { $0.mergeFailure = .server(status: 405) }
+        await app.commandCenter.startMerge(try draft(app, 233))?.value
+        let failure = try #require(app.commandCenter.mergeFailures.first)
+
+        app.commandCenter.dismissMergeFailure(failure)
+
+        #expect(app.commandCenter.mergeFailures.isEmpty)
+    }
+
+    @Test func retryingClearsTheOldBannerAndSucceeds() async throws {
+        let (app, spy) = await loaded()
+        spy.edit { $0.mergeFailure = .server(status: 405) }
+        let first = try draft(app, 233)
+        await app.commandCenter.startMerge(first)?.value
+        #expect(app.commandCenter.mergeFailures.count == 1)
+
+        spy.edit { $0.mergeFailure = nil }
+        await app.commandCenter.startMerge(try draft(app, 233))?.value
+
+        #expect(app.commandCenter.mergeFailures.isEmpty)
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 })
+    }
+
+    @Test func severalMergesRunAtOnceAndEachFailureIsKept() async throws {
+        let (app, spy) = await loaded()
+        spy.edit { $0.mergeFailure = .server(status: 406) }
+        let a = try draft(app, 233)
+        let b = try draft(app, 77)
+
+        let tasks = [app.commandCenter.startMerge(a), app.commandCenter.startMerge(b)]
+        #expect(tasks.allSatisfy { $0 != nil }, "Moving to the next MR and merging it doesn't wait for the first")
+        for task in tasks { await task?.value }
+
+        #expect(Set(app.commandCenter.mergeFailures.map(\.mrKey)) == [a.mrKey, b.mrKey])
+    }
+
+    @Test func staleCommitKeepsTheDialogOpen() async throws {
+        let (app, spy) = await loaded()
+        let draft = try draft(app, 233)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 233 })
+        mr.headSHA = String(repeating: "f", count: 40)
+
+        #expect(app.commandCenter.startMerge(draft) == nil)
+        #expect(app.commandCenter.actionErrors[draft.mrKey]?.contains("New commits") == true)
+        #expect(app.commandCenter.mergeFailures.isEmpty, "Shown in the dialog, not as a banner")
+        #expect(spy.count("merge") == 0)
+    }
+}

@@ -19,6 +19,8 @@ struct Banner: View {
     var style: Style = .info
     var actionTitle: String?
     var action: (() -> Void)?
+    /// Shows a close button when set.
+    var dismiss: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -28,6 +30,15 @@ struct Banner: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .controlSize(.small)
+            }
+            if let dismiss {
+                Button(action: dismiss) {
+                    Label("Dismiss", systemImage: "xmark")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help("Dismiss")
             }
         }
         .font(.callout)

@@ -4,6 +4,16 @@ import SwiftData
 import os
 
 /// A merge waiting for your confirmation, pinned to the commit you saw.
+/// A merge you started that GitLab refused or that failed on the way.
+struct MergeFailure: Identifiable, Equatable {
+    let mrKey: String
+    let reference: String
+    let title: String
+    let message: String
+
+    var id: String { mrKey }
+}
+
 struct MergeDraft: Identifiable {
     let mrKey: String
     let reference: String
@@ -61,6 +71,9 @@ final class CommandCenter {
     private(set) var actionErrors: [String: String] = [:]
     /// The MR waiting for you to confirm a merge (drives the merge sheet).
     var mergeDraft: MergeDraft?
+    /// Merges you started that failed after the dialog closed, newest first. Shown as a banner
+    /// until dismissed, since you've usually moved on to another MR by then.
+    private(set) var mergeFailures: [MergeFailure] = []
 
     private let container: ModelContainer
     private var context: ModelContext { container.mainContext }
@@ -204,11 +217,37 @@ final class CommandCenter {
         mergeDraft = MergeDraft(mr: mr, situation: situation(for: mr))
     }
 
+    /// Starts the merge without waiting for GitLab, so the dialog can close and you can move on.
+    /// Returns nil when it can't start (new commits arrived, or a merge or approval for this MR
+    /// is already running); the reason is in `actionErrors` and the dialog should stay open.
+    @discardableResult
+    func startMerge(_ draft: MergeDraft) -> Task<Void, Never>? {
+        guard let mr = store.mergeRequest(forKey: draft.mrKey), !mergingKeys.contains(mr.key) else { return nil }
+        guard mr.headSHA == draft.sha else {
+            actionErrors[mr.key] = Self.staleMergeMessage
+            return nil
+        }
+        mergeFailures.removeAll { $0.mrKey == draft.mrKey }
+        return Task {
+            await merge(draft)
+            if let message = actionErrors[draft.mrKey] {
+                mergeFailures.removeAll { $0.mrKey == draft.mrKey }
+                mergeFailures.insert(MergeFailure(mrKey: draft.mrKey, reference: draft.reference, title: draft.title, message: message), at: 0)
+            }
+        }
+    }
+
+    func dismissMergeFailure(_ failure: MergeFailure) {
+        mergeFailures.removeAll { $0.id == failure.id }
+    }
+
+    private static let staleMergeMessage = "New commits arrived after you opened the merge dialog. Look again before merging."
+
     /// Merges at the commit the confirmation showed, or tells GitLab to merge once the pipeline passes.
     func merge(_ draft: MergeDraft) async {
         guard let mr = store.mergeRequest(forKey: draft.mrKey) else { return }
         guard mr.headSHA == draft.sha else {
-            actionErrors[mr.key] = "New commits arrived after you opened the merge dialog. Look again before merging."
+            actionErrors[mr.key] = Self.staleMergeMessage
             return
         }
         await perform(on: mr) { client in
