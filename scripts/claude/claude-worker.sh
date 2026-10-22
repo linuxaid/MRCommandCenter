@@ -47,7 +47,8 @@ main() {
     echo "--- pass $pass of $MAX_ISSUES: $BEFORE eligible issue(s) ---"
 
     # dontAsk: anything not covered by .claude/settings.json allow rules is denied, never prompted.
-    claude -p "/work-issues" \
+    # `once`: one issue per pass, so CLAUDE_WORKER_MAX_ISSUES caps the run.
+    claude -p "/work-issues once" \
       --permission-mode dontAsk \
       --permission-prompts none \
       --max-budget-usd "$MAX_BUDGET_USD" \

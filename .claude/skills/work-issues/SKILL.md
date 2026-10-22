@@ -1,11 +1,13 @@
 ---
 name: work-issues
-description: Pick up the next open GitHub issue labeled `claude`, implement it with tests, get an independent code review, and open a PR for human review. Use when asked to work the issue queue, or when run headless by the scheduled worker.
+description: Work the GitHub issues labeled `claude` one after another, lowest number first: implement each with tests, get an independent code review, open a PR, and merge it once the suite passes and the review is clean. Issues that need answers get questions and are skipped. Use when asked to work the issue queue, or when run headless by the scheduled worker (`/work-issues once`).
 ---
 
 # Work the issue queue
 
-You are working one GitHub issue end to end, usually unattended. Nobody is watching, so you cannot ask questions live. Questions go into the issue as a comment (step 3). Work exactly **one** issue per run, then stop.
+You are working GitHub issues end to end, usually unattended. Nobody is watching, so you cannot ask questions live. Questions go into the issue as a comment (step 3).
+
+Work one issue at a time. When an issue is merged, asked about, or blocked, go back to step 1 for the next one, until no eligible issues are left (see "Next issue"). If this skill was invoked with the argument `once` (the scheduled worker does this), work exactly **one** issue and stop.
 
 Use `gh` for all GitHub work. Repo: the `origin` remote of this checkout.
 
@@ -16,7 +18,7 @@ Use `gh` for all GitHub work. Repo: the `origin` remote of this checkout.
 | `claude` | Queued for Claude. Required on every issue Claude touches. |
 | `claude:in-progress` | Claude is working it right now. |
 | `claude:needs-info` | Claude asked questions in a comment. Waiting on a human. |
-| `claude:pr-open` | A PR is open and waiting for human review. |
+| `claude:pr-open` | A PR is open. Claude merges it once the suite passes and the review is clean; it stays open only if that didn't happen (see step 9). |
 | `claude:blocked` | Claude got stuck (tests wouldn't pass, build broken, etc.). Needs a human. |
 
 An issue is **eligible** when it is open, has `claude`, and has none of the other four labels. When a human answers questions, they remove `claude:needs-info`, which makes the issue eligible again.
@@ -51,7 +53,7 @@ Ask instead of guessing when any of these is true:
 
 Do **not** ask about things you can settle by reading the code, or about small choices where any sensible default is fine. For those, pick, and say what you picked in the PR.
 
-To ask: post one comment with numbered questions, each with your suggested default ("1. Should merged MRs open read only? I'd suggest read only, since actions don't apply."). Then remove `claude:in-progress`, add `claude:needs-info`, and **stop this run**. Do not start coding.
+To ask: post one comment with numbered questions, each with your suggested default ("1. Should merged MRs open read only? I'd suggest read only, since actions don't apply."). Then remove `claude:in-progress`, add `claude:needs-info`, and **stop working this issue**. Do not start coding. Go to "Next issue".
 
 ## 4. Build it
 
@@ -106,7 +108,25 @@ It returns findings marked **Blocking**, **Should fix**, or **Nit**.
    ```
 
 3. On the issue: remove `claude:in-progress`, add `claude:pr-open`, and comment with the PR link.
-4. **Never merge.** Stop here.
+
+## 9. Merge
+
+The owner has authorized Claude to merge its own PRs in this repo, under these conditions:
+
+1. Merge only when **all** of these hold:
+   - the full suite ended with `** TEST SUCCEEDED **` on the PR's final commit;
+   - no **Blocking** review finding is left unfixed;
+   - the PR is not a draft.
+
+   Otherwise leave the PR open, comment on it saying why, label the issue `claude:blocked`, and go to "Next issue".
+2. `gh pr merge <pr> --merge --delete-branch`. Never push to `main` directly and never force push.
+3. If GitHub refuses because `main` moved (conflicts):
+   1. Run `git fetch origin` and `git merge origin/main` on the branch, and resolve the conflicts.
+   2. Rerun the full suite (step 5 rules), push, and try the merge once more.
+   3. If it still can't merge, follow "If you get stuck".
+4. Check that the issue closed (`Closes #<n>` does it). If it didn't, run `gh issue close <n>`. Remove `claude:pr-open`.
+5. If the PR's "Not verified by tests" section isn't "Nothing", comment on the issue with that list, headed "Merged. Worth checking by hand next time you run the app:".
+6. `git checkout main && git pull --ff-only`, so the next issue builds on this one.
 
 ## If you get stuck
 
@@ -114,12 +134,18 @@ Tests still failing after 3 attempts, the build is broken on `main`, or somethin
 
 1. If you have useful work, push the branch and open the PR as a **draft** (`gh pr create --draft`), explaining exactly what fails and what you tried.
 2. Otherwise, comment on the issue with what happened.
-3. Remove `claude:in-progress`, add `claude:blocked`, and stop.
+3. Remove `claude:in-progress`, add `claude:blocked`, and go to "Next issue".
+4. If `main` itself is broken (it doesn't build or its tests fail before you change anything), stop the whole run instead: every other issue would hit the same wall.
+
+## Next issue
+
+Unless invoked with `once`, go back to step 0 (preflight) and pick the next eligible issue. An issue you asked about, merged, or blocked is no longer eligible, so the queue always shrinks. Stop when step 1 finds no eligible issues, or if an issue you just handled is somehow still eligible (never work the same issue twice in one run).
 
 ## Final output
 
-End the run with one short line, for example:
-- `#5: PR opened <url>`
+End the run with one short line per issue handled, for example:
+- `#5: merged <url>`
+- `#5: PR opened, not merged (Blocking finding left) <url>`
 - `#5: asked 2 questions, waiting`
 - `#5: blocked, tests failing in LayoutStressTests (draft PR <url>)`
 - `No eligible issues`
