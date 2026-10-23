@@ -7,6 +7,13 @@ enum CommentTarget: Hashable {
     case reply(discussionID: String)
 }
 
+/// A file's group of threads that can't sit on a shown line.
+struct ThreadGroupID: Hashable {
+    enum Kind { case offDiff, outdated }
+    let fileID: DiffFile.ID
+    let kind: Kind
+}
+
 /// Comment threads and composer state for the Changes view of one MR.
 @Observable
 final class CommentsModel {
@@ -20,8 +27,33 @@ final class CommentsModel {
     var drafts: [CommentTarget: String] = [:]
     private(set) var postingTarget: CommentTarget?
     private(set) var postErrors: [CommentTarget: String] = [:]
-    /// Resolved threads the user expanded (they start collapsed).
-    var expandedThreadIDs: Set<String> = []
+    /// Threads the user folded. Every thread starts open, resolved ones included, so
+    /// resolved threads are never hidden behind a click.
+    private(set) var collapsedThreadIDs: Set<String> = []
+    /// Per-file thread groups the user folded or opened, overriding where they start.
+    private var groupExpansion: [ThreadGroupID: Bool] = [:]
+
+    func isExpanded(_ discussion: GitLabDiscussion) -> Bool {
+        !collapsedThreadIDs.contains(discussion.id)
+    }
+
+    func toggleExpanded(_ discussion: GitLabDiscussion) {
+        if collapsedThreadIDs.contains(discussion.id) {
+            collapsedThreadIDs.remove(discussion.id)
+        } else {
+            collapsedThreadIDs.insert(discussion.id)
+        }
+    }
+
+    /// Both groups start open: resolved threads usually end up outdated (the line was
+    /// fixed, then the thread resolved), and a folded group hid them.
+    func isGroupExpanded(_ group: ThreadGroupID) -> Bool {
+        groupExpansion[group] ?? true
+    }
+
+    func setGroupExpanded(_ group: ThreadGroupID, _ expanded: Bool) {
+        groupExpansion[group] = expanded
+    }
 
     // MARK: AI concerns
 

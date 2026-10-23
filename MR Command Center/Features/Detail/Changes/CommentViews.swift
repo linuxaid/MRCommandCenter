@@ -45,11 +45,11 @@ struct FileLevelThreads: View {
                 }
                 if !threads.offDiff.isEmpty {
                     ThreadGroup(title: "Comments on lines not shown in this diff", systemImage: "text.bubble",
-                                threads: threads.offDiff, startsExpanded: true)
+                                threads: threads.offDiff, id: ThreadGroupID(fileID: fileID, kind: .offDiff))
                 }
                 if !threads.outdated.isEmpty {
                     ThreadGroup(title: "Outdated comments (left on an earlier version)", systemImage: "clock.arrow.circlepath",
-                                threads: threads.outdated, startsExpanded: false)
+                                threads: threads.outdated, id: ThreadGroupID(fileID: fileID, kind: .outdated))
                 }
             }
             .padding(12)
@@ -63,17 +63,13 @@ private struct ThreadGroup: View {
     let title: String
     let systemImage: String
     let threads: [GitLabDiscussion]
-    @State private var isExpanded: Bool
-
-    init(title: String, systemImage: String, threads: [GitLabDiscussion], startsExpanded: Bool) {
-        self.title = title
-        self.systemImage = systemImage
-        self.threads = threads
-        _isExpanded = State(initialValue: startsExpanded)
-    }
+    let id: ThreadGroupID
+    /// Open or folded comes only from `CommentsModel`, which is tested; no `@State` here.
+    @Environment(CommentsModel.self) private var comments
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
+        let isExpanded = Binding { comments.isGroupExpanded(id) } set: { comments.setGroupExpanded(id, $0) }
+        DisclosureGroup(isExpanded: isExpanded) {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(threads) { thread in
                     VStack(alignment: .leading, spacing: 4) {
@@ -101,13 +97,14 @@ private struct ThreadGroup: View {
     }
 }
 
-/// One comment thread. Resolved threads start collapsed.
+/// One comment thread. Every thread starts open; resolved ones can be folded from their header.
 struct ThreadView: View {
     let discussion: GitLabDiscussion
     @Environment(CommentsModel.self) private var comments
 
+    /// Fold state lives only in `CommentsModel` (tested there); don't add a local default here.
     private var isExpanded: Bool {
-        !discussion.isResolved || comments.expandedThreadIDs.contains(discussion.id)
+        !discussion.isResolved || comments.isExpanded(discussion)
     }
 
     var body: some View {
@@ -137,11 +134,7 @@ struct ThreadView: View {
 
     private var resolvedHeader: some View {
         Button {
-            if comments.expandedThreadIDs.contains(discussion.id) {
-                comments.expandedThreadIDs.remove(discussion.id)
-            } else {
-                comments.expandedThreadIDs.insert(discussion.id)
-            }
+            comments.toggleExpanded(discussion)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
