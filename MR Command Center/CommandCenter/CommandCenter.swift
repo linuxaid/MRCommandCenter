@@ -113,6 +113,8 @@ final class CommandCenter {
     static let readyReviewsRuleName = "Merge ready reviews"
 
     var mergesReadyReviews: Bool { settings.mergeReadyReviewsAutomatically }
+    /// Where the merge sheet remembers squash and delete-branch. Tests pass their own.
+    var mergeDefaults: UserDefaults = .standard
 
     func setMergesReadyReviews(_ isOn: Bool) {
         settings.mergeReadyReviewsAutomatically = isOn
@@ -120,9 +122,12 @@ final class CommandCenter {
     }
 
     /// With the setting on, a ready MR you're reviewing (not one you opened) that none of your
-    /// rules covers merges on the next check.
+    /// rules covers merges on the next check. "Ready" means what the list shows: it would be in
+    /// Ready to merge. GitLab can call an MR mergeable while a reply is waiting on you; that MR
+    /// is in Your move (or Set aside), so it isn't merged out from under you.
     private func readyReviewStatus(for mr: TrackedMR) -> RuleStatus? {
-        guard mergesReadyReviews, mr.isReviewer, !mr.isAuthor, !mr.isDraft, Readiness(mr).isReady else { return nil }
+        guard mergesReadyReviews, mr.isReviewer, !mr.isAuthor, !mr.isDraft,
+              MRSituation.ignoringSetAside(for: mr, me: store.username, rule: nil).lane == .readyToMerge else { return nil }
         return RuleStatus(ruleID: Self.readyReviewsRuleID, ruleName: Self.readyReviewsRuleName, unmet: [], isLive: true)
     }
 
@@ -418,8 +423,10 @@ final class CommandCenter {
 
     // MARK: Automatic merging
 
-    /// Merges every MR whose rule says it's ready, at exactly the commit that was checked.
-    /// Each head commit is handled once, so a refusal isn't retried until something is pushed.
+    /// Merges every MR whose rule says it's ready, and (with that setting on) every ready MR you're
+    /// reviewing, at exactly the commit that was checked. Rules follow the dry-run switch; ready
+    /// reviews have their own. Each head commit is handled once, so a refusal isn't retried until
+    /// something is pushed.
     func runRules(now: Date = .now) async {
         guard hasEnabledRules || mergesReadyReviews else { return }
         let isLive = isAutoMergeLive
@@ -443,12 +450,18 @@ final class CommandCenter {
             if client == nil {
                 client = try? dependencies.gitLabClient(settings: settings)
             }
-            guard let client else { return }
+            guard let client else {
+                // No GitLab account to merge with: leave this commit to try again, and say why.
+                mr.autoMergeHandledSHA = nil
+                mr.autoMergeError = "Couldn't merge: set up your GitLab account in Settings → Accounts."
+                save()
+                return
+            }
 
             mergingKeys.insert(mr.key)
             defer { mergingKeys.remove(mr.key) }
             do {
-                let remembered = MergeDraft.rememberedOptions()
+                let remembered = MergeDraft.rememberedOptions(mergeDefaults)
                 let options = MergeOptions(sha: mr.headSHA, squash: rule?.squash ?? remembered.squash,
                                            shouldRemoveSourceBranch: rule?.removeSourceBranch ?? remembered.removeSourceBranch)
                 _ = try await client.merge(projectID: mr.projectID, iid: mr.iid, options: options)
@@ -459,19 +472,21 @@ final class CommandCenter {
                 let message = isReadyReview ? "Merged automatically: it was ready and you're a reviewer"
                                             : "Merged automatically by rule “\(status.ruleName)”"
                 store.record(.init(kind: .autoMerged, message: message), for: mr)
+                mergeFailures.removeAll { $0.mrKey == mr.key }
                 mergedAny = true
-                Log.sync.info("Rule merged an MR")
+                Log.sync.info("Merged an MR automatically")
             } catch {
                 let (message, retry) = Self.describeMergeFailure(error)
                 mr.autoMergeError = message
                 if retry { mr.autoMergeHandledSHA = nil }
                 store.record(.init(kind: .autoMergeFailed, message: "Automatic merge failed: \(message)"), for: mr)
-                if isReadyReview {
-                    // You didn't ask for this one by hand, so say so where you'll see it.
+                // A ready review merges without you asking each time, so a failure that won't be
+                // retried (offline and 409s are) gets the same banner a manual merge would.
+                if isReadyReview, !retry {
                     mergeFailures.removeAll { $0.mrKey == mr.key }
                     mergeFailures.insert(MergeFailure(mrKey: mr.key, reference: mr.reference, title: mr.title, message: message), at: 0)
                 }
-                Log.sync.error("Rule merge failed: \(message, privacy: .public)")
+                Log.sync.error("Automatic merge failed: \(message, privacy: .public)")
             }
         }
         save()

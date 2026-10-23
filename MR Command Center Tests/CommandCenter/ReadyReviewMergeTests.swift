@@ -12,15 +12,41 @@ struct ReadyReviewMergeTests {
     private let app: AppModel
     private var center: CommandCenter { app.commandCenter }
 
+    /// Its own defaults, so the app's real remembered merge choices are never touched.
+    private let defaults: UserDefaults
+
     init() {
         app = AppModel.testing(gitLab: spy)
+        let name = "ReadyReviewMergeTests-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        app.commandCenter.mergeDefaults = defaults
+    }
+
+    private func isReadyReview(_ mr: TrackedMR) -> Bool {
+        mr.isReviewer && !mr.isAuthor && center.situation(for: mr).lane == .readyToMerge
     }
 
     private func loaded() async throws -> TrackedMR {
         await app.refresh(.automatic)
-        return try #require(app.mergeRequests.trackedMergeRequests.first {
-            $0.isReviewer && !$0.isAuthor && Readiness($0).isReady
-        }, "The mock data has a ready MR you're reviewing")
+        return try #require(app.mergeRequests.trackedMergeRequests.first(where: isReadyReview),
+                            "The mock data has a ready MR you're reviewing")
+    }
+
+    /// Makes a second MR you're reviewing ready, so there are two to merge.
+    private func makeReady(_ mr: TrackedMR) {
+        mr.isDraft = false
+        mr.approvalsGiven = max(mr.approvalsRequired, 1)
+        mr.approvalsRequired = max(mr.approvalsRequired, 1)
+        mr.approvedByUsernames = ["aj"]
+        mr.pipelineStatusRaw = PipelineStatus.success.rawValue
+        mr.pipelineSHA = mr.headSHA
+        mr.unresolvedDiscussions = 0
+        mr.threadsAwaitingMe = 0
+        mr.threadsAwaitingOthers = 0
+        mr.hasConflicts = false
+        mr.detailedMergeStatus = "mergeable"
+        mr.mergeWhenPipelineSucceeds = false
     }
 
     private func events(_ kind: ActivityKind, for mr: TrackedMR) throws -> [ActivityEvent] {
@@ -90,12 +116,6 @@ struct ReadyReviewMergeTests {
     }
 
     @Test func usesYourRememberedMergeOptions() async throws {
-        let defaults = UserDefaults.standard
-        let previous = (defaults.object(forKey: "mergeSquash"), defaults.object(forKey: "mergeRemoveSourceBranch"))
-        defer {
-            defaults.set(previous.0, forKey: "mergeSquash")
-            defaults.set(previous.1, forKey: "mergeRemoveSourceBranch")
-        }
         defaults.set(true, forKey: "mergeSquash")
         defaults.set(false, forKey: "mergeRemoveSourceBranch")
         _ = try await loaded()
@@ -133,6 +153,77 @@ struct ReadyReviewMergeTests {
         #expect(try events(.autoMergeFailed, for: mr).count == 1)
         #expect(center.mergeFailures.map(\.mrKey) == [mr.key], "And as a banner")
         #expect(app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key })
+    }
+
+    @Test func aReplyWaitingOnYouIsNotMergedEvenIfGitLabSaysMergeable() async throws {
+        let mr = try await loaded()
+        mr.threadsAwaitingMe = 1
+        mr.unresolvedDiscussions = 1
+        mr.lastReplyFrom = "Priya Natarajan"
+        mr.detailedMergeStatus = "mergeable"
+        center.setMergesReadyReviews(true)
+        #expect(center.situation(for: mr).lane == .yourMove, "The card says a reply is waiting on you")
+
+        await center.runRules()
+
+        #expect(spy.count("merge") == 0)
+    }
+
+    @Test func aSetAsideMRIsNotMerged() async throws {
+        let mr = try await loaded()
+        mr.threadsAwaitingMe = 1
+        mr.unresolvedDiscussions = 1
+        center.setAside(mr)
+        try #require(center.situation(for: mr).lane == .setAside)
+        center.setMergesReadyReviews(true)
+
+        await center.runRules()
+
+        #expect(spy.count("merge") == 0)
+    }
+
+    @Test func draftsAreLeftAlone() async throws {
+        let mr = try await loaded()
+        mr.isDraft = true
+        center.setMergesReadyReviews(true)
+
+        await center.runRules()
+
+        #expect(spy.count("merge") == 0)
+    }
+
+    @Test func oneFailingDoesntStopTheOthers() async throws {
+        let first = try await loaded()
+        let second = try #require(app.mergeRequests.trackedMergeRequests.first {
+            $0.isReviewer && !$0.isAuthor && $0.key != first.key
+        })
+        makeReady(second)
+        try #require(isReadyReview(second))
+        spy.edit { $0.mergeFailuresByIID[first.iid] = .server(status: 406) }
+        center.setMergesReadyReviews(true)
+
+        await center.runRules()
+
+        #expect(spy.count("merge") == 2, "Both were tried")
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.key == second.key }, "The other one merged")
+        #expect(app.mergeRequests.trackedMergeRequests.contains { $0.key == first.key })
+        #expect(first.autoMergeError?.contains("406") == true)
+        #expect(center.mergeFailures.map(\.mrKey) == [first.key])
+    }
+
+    @Test func aFailureThatWillBeRetriedHasNoBannerAndASuccessClearsIt() async throws {
+        let mr = try await loaded()
+        spy.edit { $0.mergeFailure = .server(status: 409) }
+        center.setMergesReadyReviews(true)
+
+        await center.runRules()
+        #expect(center.mergeFailures.isEmpty, "It'll be tried again, so no banner yet")
+        #expect(mr.autoMergeHandledSHA == nil)
+
+        spy.edit { $0.mergeFailure = nil }
+        await center.runRules()
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key })
+        #expect(center.mergeFailures.isEmpty)
     }
 
     @Test func turningItOffStopsIt() async throws {
