@@ -247,20 +247,28 @@ final class CommandCenter {
         mergeFailures.removeAll { $0.id == failure.id }
     }
 
+    /// Whether the failed MR is still in your list, so "Show" has something to open.
+    func canShow(_ failure: MergeFailure) -> Bool {
+        store.mergeRequest(forKey: failure.mrKey) != nil
+    }
+
+    /// Opens the MR whose merge failed (its brief has the same error) on a page that lists it,
+    /// so the arrow keys carry on from there.
+    func show(_ failure: MergeFailure) {
+        guard let mr = store.mergeRequest(forKey: failure.mrKey) else { return }
+        dismissMergeFailure(failure)
+        let lane = situation(for: mr).lane
+        if !lanesShown(for: destination).contains(lane) {
+            destination = lanesShown(for: .briefing).contains(lane) ? .briefing : .lane(lane)
+        }
+        store.selectedKey = mr.key
+    }
+
     private static let staleMergeMessage = "New commits arrived after you opened the merge dialog. Look again before merging."
     private static let busyMessage = "A merge or approval for this merge request is already running. Wait for it to finish."
 
     /// Merges at the commit the confirmation showed, or tells GitLab to merge once the pipeline passes.
-    func merge(_ draft: MergeDraft) async {
-        guard let mr = store.mergeRequest(forKey: draft.mrKey) else { return }
-        guard mr.headSHA == draft.sha else {
-            actionErrors[mr.key] = Self.staleMergeMessage
-            return
-        }
-        await send(draft, for: mr)
-    }
-
-    /// Sends the merge. Returns this merge's failure message, or nil if it went through.
+    /// Returns this merge's failure message, or nil if it went through.
     @discardableResult
     private func send(_ draft: MergeDraft, for mr: TrackedMR, isClaimed: Bool = false) async -> String? {
         await perform(on: mr, isClaimed: isClaimed) { client in

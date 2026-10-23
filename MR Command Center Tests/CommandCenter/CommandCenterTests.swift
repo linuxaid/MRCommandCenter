@@ -393,7 +393,7 @@ struct ManualActionTests {
         #expect(draft.notReady.isEmpty)
         draft.squash = true
 
-        await app.commandCenter.merge(draft)
+        await app.commandCenter.startMerge(draft)?.value
 
         #expect(spy.state.withLock { $0.merges.last?.sha } == draft.sha)
         #expect(spy.state.withLock { $0.merges.last?.squash } == true)
@@ -407,7 +407,7 @@ struct ManualActionTests {
         let draft = try #require(app.commandCenter.mergeDraft)
         gateway.headSHA = String(repeating: "f", count: 40)
 
-        await app.commandCenter.merge(draft)
+        await app.commandCenter.startMerge(draft)?.value
 
         #expect(spy.count("merge") == 0)
         #expect(app.commandCenter.actionErrors[gateway.key] != nil)
@@ -420,7 +420,7 @@ struct ManualActionTests {
         let draft = try #require(app.commandCenter.mergeDraft)
         #expect(draft.pipelineRunning && draft.whenPipelineSucceeds)
 
-        await app.commandCenter.merge(draft)
+        await app.commandCenter.startMerge(draft)?.value
 
         #expect(spy.state.withLock { $0.merges.last?.mergeWhenPipelineSucceeds } == true)
         #expect(terraform.isInReviewerList, "Still open until the pipeline passes")
@@ -474,7 +474,7 @@ struct BackgroundMergeTests {
         await app.commandCenter.approve(mr)
         await task?.value
 
-        #expect(spy.count("approve") == 0, "The approval waited its turn instead of slipping in")
+        #expect(spy.count("approve") == 0, "The approval is refused while the merge holds the MR")
         #expect(spy.count("merge") == 1)
         #expect(app.commandCenter.mergeFailures.isEmpty)
         #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 })
@@ -555,6 +555,63 @@ struct BackgroundMergeTests {
         for task in tasks { await task?.value }
 
         #expect(Set(app.commandCenter.mergeFailures.map(\.mrKey)) == [a.mrKey, b.mrKey])
+    }
+
+    private func failure(_ app: AppModel, _ spy: SpyGitLabClient, _ iid: Int) async throws -> MergeFailure {
+        spy.edit { $0.mergeFailure = .server(status: 405) }
+        await app.commandCenter.startMerge(try draft(app, iid))?.value
+        return try #require(app.commandCenter.mergeFailures.first)
+    }
+
+    @Test func showFromRulesOpensTheBriefingWithTheMR() async throws {
+        let (app, spy) = await loaded()
+        let failure = try await failure(app, spy, 233)
+        app.commandCenter.destination = .rules
+
+        #expect(app.commandCenter.canShow(failure))
+        app.commandCenter.show(failure)
+
+        #expect(app.commandCenter.destination == .briefing)
+        #expect(app.mergeRequests.selectedKey == failure.mrKey)
+        #expect(app.commandCenter.orderedKeys(for: .briefing).contains(failure.mrKey), "Arrow keys have an anchor")
+        #expect(app.commandCenter.mergeFailures.isEmpty)
+    }
+
+    @Test func showFromALaneThatDoesntListTheMRLeavesThatLane() async throws {
+        let (app, spy) = await loaded()
+        let failure = try await failure(app, spy, 233)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 233 })
+        let lane = app.commandCenter.situation(for: mr).lane
+        let other = try #require(Lane.allCases.first { $0 != lane && $0 != .drafts })
+        app.commandCenter.destination = .lane(other)
+
+        app.commandCenter.show(failure)
+
+        #expect(app.commandCenter.orderedKeys(for: app.commandCenter.destination).contains(failure.mrKey))
+        #expect(app.mergeRequests.selectedKey == failure.mrKey)
+    }
+
+    @Test func showStaysOnALaneThatAlreadyListsTheMR() async throws {
+        let (app, spy) = await loaded()
+        let failure = try await failure(app, spy, 233)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 233 })
+        let lane = app.commandCenter.situation(for: mr).lane
+        app.commandCenter.destination = .lane(lane)
+
+        app.commandCenter.show(failure)
+
+        #expect(app.commandCenter.destination == .lane(lane))
+    }
+
+    @Test func aFailureForAnMRThatLeftTheListCantBeShownButStays() async throws {
+        let (app, spy) = await loaded()
+        let failure = try await failure(app, spy, 233)
+        spy.edit { $0.data.entries.removeAll { $0.detail.iid == 233 } }
+        await app.refresh(.automatic)
+
+        #expect(!app.commandCenter.canShow(failure))
+        app.commandCenter.show(failure)
+        #expect(app.commandCenter.mergeFailures == [failure], "Still listed until you dismiss it")
     }
 
     @Test func staleCommitKeepsTheDialogOpen() async throws {
