@@ -44,7 +44,9 @@ struct RootView: View {
                 problemBanner
                 ForEach(center.mergeFailures) { failure in
                     Banner(message: "Couldn't merge \(failure.reference) “\(failure.title)”: \(failure.message)",
-                           systemImage: "xmark.octagon", style: .error, actionTitle: "Show",
+                           systemImage: "xmark.octagon", style: .error,
+                           // Nothing to show once it has left your list (merged or closed elsewhere).
+                           actionTitle: store.mergeRequest(forKey: failure.mrKey) == nil ? nil : "Show",
                            action: { show(failure) }, dismiss: { center.dismissMergeFailure(failure) })
                 }
             }

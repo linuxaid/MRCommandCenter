@@ -457,6 +457,51 @@ struct BackgroundMergeTests {
         #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 })
         #expect(app.commandCenter.mergeFailures.isEmpty)
         #expect(!app.commandCenter.mergingKeys.contains(draft.mrKey))
+        let merged = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
+            .filter { $0.mrKey == draft.mrKey && $0.kind == .autoMerged }
+        #expect(merged.count == 1, "Activity records the merge")
+    }
+
+    @Test func theMRIsBusyAsSoonAsTheMergeStarts() async throws {
+        let (app, spy) = await loaded()
+        let draft = try draft(app, 233)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 233 })
+
+        let task = app.commandCenter.startMerge(draft)
+        #expect(app.commandCenter.mergingKeys.contains(draft.mrKey), "The row spinner shows right away")
+
+        // Something else tries to act on the same MR before the merge task has run.
+        await app.commandCenter.approve(mr)
+        await task?.value
+
+        #expect(spy.count("approve") == 0, "The approval waited its turn instead of slipping in")
+        #expect(spy.count("merge") == 1)
+        #expect(app.commandCenter.mergeFailures.isEmpty)
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.iid == 233 })
+    }
+
+    @Test func aMergeAlreadyRunningKeepsTheDialogOpenWithTheReason() async throws {
+        let (app, spy) = await loaded()
+        let draft = try draft(app, 233)
+        let task = app.commandCenter.startMerge(draft)
+
+        #expect(app.commandCenter.startMerge(draft) == nil)
+        #expect(app.commandCenter.actionErrors[draft.mrKey]?.contains("already running") == true)
+        await task?.value
+        #expect(spy.count("merge") == 1)
+    }
+
+    @Test func mergeWhenThePipelineSucceedsStillWorksInTheBackground() async throws {
+        let (app, spy) = await loaded()
+        let draft = try draft(app, 77)
+        #expect(draft.pipelineRunning && draft.whenPipelineSucceeds)
+
+        await app.commandCenter.startMerge(draft)?.value
+
+        let terraform = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 77 })
+        #expect(spy.state.withLock { $0.merges.last?.mergeWhenPipelineSucceeds } == true)
+        #expect(terraform.mergeWhenPipelineSucceeds)
+        #expect(app.commandCenter.mergeFailures.isEmpty)
     }
 
     @Test func aFailedMergeIsReportedAsABanner() async throws {

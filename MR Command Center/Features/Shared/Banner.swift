@@ -45,6 +45,6 @@ struct Banner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(style.tint.opacity(0.15))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 }

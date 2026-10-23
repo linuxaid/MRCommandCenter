@@ -3,7 +3,6 @@ import Observation
 import SwiftData
 import os
 
-/// A merge waiting for your confirmation, pinned to the commit you saw.
 /// A merge you started that GitLab refused or that failed on the way.
 struct MergeFailure: Identifiable, Equatable {
     let mrKey: String
@@ -14,6 +13,7 @@ struct MergeFailure: Identifiable, Equatable {
     var id: String { mrKey }
 }
 
+/// A merge waiting for your confirmation, pinned to the commit you saw.
 struct MergeDraft: Identifiable {
     let mrKey: String
     let reference: String
@@ -222,18 +222,24 @@ final class CommandCenter {
     /// is already running); the reason is in `actionErrors` and the dialog should stay open.
     @discardableResult
     func startMerge(_ draft: MergeDraft) -> Task<Void, Never>? {
-        guard let mr = store.mergeRequest(forKey: draft.mrKey), !mergingKeys.contains(mr.key) else { return nil }
+        guard let mr = store.mergeRequest(forKey: draft.mrKey) else { return nil }
+        guard !mergingKeys.contains(mr.key) else {
+            actionErrors[mr.key] = Self.busyMessage
+            return nil
+        }
         guard mr.headSHA == draft.sha else {
             actionErrors[mr.key] = Self.staleMergeMessage
             return nil
         }
         mergeFailures.removeAll { $0.mrKey == draft.mrKey }
+        // Claimed now, not when the task runs: the row shows the spinner at once, and rules and
+        // approvals can't act on this MR in between. The task holds `mr` itself, so the merge
+        // still goes ahead if a refresh drops it from the list meanwhile.
+        mergingKeys.insert(mr.key)
         return Task {
-            await merge(draft)
-            if let message = actionErrors[draft.mrKey] {
-                mergeFailures.removeAll { $0.mrKey == draft.mrKey }
-                mergeFailures.insert(MergeFailure(mrKey: draft.mrKey, reference: draft.reference, title: draft.title, message: message), at: 0)
-            }
+            guard let message = await send(draft, for: mr, isClaimed: true) else { return }
+            mergeFailures.removeAll { $0.mrKey == draft.mrKey }
+            mergeFailures.insert(MergeFailure(mrKey: draft.mrKey, reference: draft.reference, title: draft.title, message: message), at: 0)
         }
     }
 
@@ -242,6 +248,7 @@ final class CommandCenter {
     }
 
     private static let staleMergeMessage = "New commits arrived after you opened the merge dialog. Look again before merging."
+    private static let busyMessage = "A merge or approval for this merge request is already running. Wait for it to finish."
 
     /// Merges at the commit the confirmation showed, or tells GitLab to merge once the pipeline passes.
     func merge(_ draft: MergeDraft) async {
@@ -250,7 +257,13 @@ final class CommandCenter {
             actionErrors[mr.key] = Self.staleMergeMessage
             return
         }
-        await perform(on: mr) { client in
+        await send(draft, for: mr)
+    }
+
+    /// Sends the merge. Returns this merge's failure message, or nil if it went through.
+    @discardableResult
+    private func send(_ draft: MergeDraft, for mr: TrackedMR, isClaimed: Bool = false) async -> String? {
+        await perform(on: mr, isClaimed: isClaimed) { client in
             let options = MergeOptions(sha: draft.sha, squash: draft.squash, shouldRemoveSourceBranch: draft.removeSourceBranch,
                                        mergeWhenPipelineSucceeds: draft.whenPipelineSucceeds ? true : nil)
             let result = try await client.merge(projectID: mr.projectID, iid: mr.iid, options: options)
@@ -265,9 +278,15 @@ final class CommandCenter {
         }
     }
 
-    private func perform(on mr: TrackedMR, _ action: @escaping (any GitLabAPI) async throws -> Void) async {
-        guard !mergingKeys.contains(mr.key) else { return }
-        mergingKeys.insert(mr.key)
+    /// Runs one approve or merge call with the MR marked busy. `isClaimed` means the caller already
+    /// marked it. Returns the failure shown in the brief, or nil on success (or if it was busy).
+    @discardableResult
+    private func perform(on mr: TrackedMR, isClaimed: Bool = false,
+                         _ action: @escaping (any GitLabAPI) async throws -> Void) async -> String? {
+        if !isClaimed {
+            guard !mergingKeys.contains(mr.key) else { return nil }
+            mergingKeys.insert(mr.key)
+        }
         defer { mergingKeys.remove(mr.key) }
         actionErrors[mr.key] = nil
         do {
@@ -277,9 +296,12 @@ final class CommandCenter {
             if mr.isInReviewerList {
                 await store.refreshDetails(for: mr)
             }
+            return nil
         } catch {
-            actionErrors[mr.key] = Self.describeActionFailure(error)
+            let message = Self.describeActionFailure(error)
+            actionErrors[mr.key] = message
             Log.sync.error("MR action failed: \(error.localizedDescription, privacy: .public)")
+            return message
         }
     }
 
