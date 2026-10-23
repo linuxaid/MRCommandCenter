@@ -42,6 +42,18 @@ struct RootView: View {
                     Banner(message: warning, systemImage: "exclamationmark.triangle", style: .warning)
                 }
                 problemBanner
+                // The newest few; the rest wait their turn so the window keeps its room.
+                ForEach(center.mergeFailures.prefix(Self.maxFailureBanners)) { failure in
+                    Banner(message: "Couldn't merge \(failure.reference) “\(failure.title)”: \(failure.message)",
+                           systemImage: "xmark.octagon", style: .error,
+                           actionTitle: center.canShow(failure) ? "Show" : nil,
+                           action: { center.show(failure) }, dismiss: { center.dismissMergeFailure(failure) })
+                }
+                if center.mergeFailures.count > Self.maxFailureBanners {
+                    let more = center.mergeFailures.count - Self.maxFailureBanners
+                    Banner(message: "\(more) more failed \(more == 1 ? "merge" : "merges"). Dismiss these to see \(more == 1 ? "it" : "them").",
+                           systemImage: "xmark.octagon", style: .error)
+                }
             }
         }
         .task {
@@ -132,6 +144,7 @@ struct RootView: View {
 extension RootView {
     /// Fixed so the window minimum never depends on content.
     static let detailMinWidth: CGFloat = 320
+    static let maxFailureBanners = 3
 }
 
 /// Refresh, with the last refresh time underneath.

@@ -132,10 +132,8 @@ struct MergeSheet: View {
                 Button {
                     UserDefaults.standard.set(draft.squash, forKey: "mergeSquash")
                     UserDefaults.standard.set(draft.removeSourceBranch, forKey: "mergeRemoveSourceBranch")
-                    Task {
-                        await appModel.commandCenter.merge(draft)
-                        if appModel.commandCenter.actionErrors[draft.mrKey] == nil { dismiss() }
-                    }
+                    // The merge finishes in the background; a failure shows as a banner.
+                    if appModel.commandCenter.startMerge(draft) != nil { dismiss() }
                 } label: {
                     Text(draft.pipelineRunning && draft.whenPipelineSucceeds ? "Merge When Pipeline Succeeds" : "Merge")
                         .frame(minWidth: 80)
