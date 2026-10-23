@@ -105,18 +105,21 @@ struct MRSituation: Equatable {
                            readiness: natural.readiness, rule: natural.rule, yourMoveReason: reason)
     }
 
-    /// A set-aside MR stays parked while nothing has changed since: the same commit, the same
-    /// kind of reason it needed you, and no reply to you newer than the newest one you'd seen.
-    /// Replies compare GitLab's timestamps with each other, never with this Mac's clock.
+    /// A set-aside MR stays parked until something new happens (see `somethingNewSinceSetAside`).
     static func isStillSetAside(_ mr: TrackedMR, reason: YourMoveReason) -> Bool {
-        guard mr.setAsideAt != nil else { return false }
-        let noNewReply: Bool
-        if let latest = mr.lastReplyToMeAt {
-            noNewReply = mr.setAsideReplyAt.map { latest <= $0 } ?? false
-        } else {
-            noNewReply = true
-        }
-        return mr.setAsideSHA == mr.headSHA && mr.setAsideReason == reason.rawValue && noNewReply
+        mr.setAsideAt != nil && !somethingNewSinceSetAside(mr, reason: reason)
+    }
+
+    /// The only things that end a set aside: a new commit, a reply to you newer than the newest
+    /// one you'd seen (GitLab time against GitLab time, never this Mac's clock), or Your move
+    /// again for a different kind of reason. `reason` is why it's your move now, or nil if it
+    /// isn't right now. A passing state on its own (GitLab rechecking mergeability, a pipeline
+    /// rerunning on the same commit) is not new, and neither is a thread count dropping.
+    static func somethingNewSinceSetAside(_ mr: TrackedMR, reason: YourMoveReason?) -> Bool {
+        if mr.setAsideSHA != mr.headSHA { return true }
+        if let latest = mr.lastReplyToMeAt, let seen = mr.setAsideReplyAt, latest > seen { return true }
+        if let reason, reason.rawValue != mr.setAsideReason { return true }
+        return false
     }
 
     /// Where the MR would be if you hadn't set it aside.

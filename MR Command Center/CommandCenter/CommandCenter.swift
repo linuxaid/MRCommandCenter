@@ -158,20 +158,26 @@ final class CommandCenter {
         if alreadySeen { mr.seenAt = mr.lastActivityAt }
     }
 
-    /// After a refresh: MRs where something new happened leave Set aside for good, so a later
-    /// coincidence (the same reason again) can't park them a second time.
+    /// After a refresh: MRs where something new happened leave Set aside for good, so the same
+    /// reason coming round again can't park them a second time. An MR that's only out of Your
+    /// move for a while (a pipeline rerunning, GitLab rechecking conflicts) stays set aside.
     func releaseSetAside() {
-        var released = false
+        var changed = false
         for mr in store.trackedMergeRequests where mr.setAsideAt != nil {
-            let lane = situation(for: mr).lane
-            guard lane != .setAside else { continue }
+            // Stores from before reply times were kept: take the first one we learn as already seen.
+            if mr.setAsideReplyAt == nil, let latest = mr.lastReplyToMeAt {
+                mr.setAsideReplyAt = latest
+                changed = true
+            }
+            let natural = MRSituation.ignoringSetAside(for: mr, me: store.username, rule: ruleStatus(for: mr))
+            guard MRSituation.somethingNewSinceSetAside(mr, reason: natural.yourMoveReason) else { continue }
             clearSetAside(mr)
-            released = true
-            if lane == .yourMove {
+            changed = true
+            if natural.lane == .yourMove {
                 store.record(.init(kind: .broughtBack, message: "Something new happened, so it's back in Your move"), for: mr)
             }
         }
-        if released { save() }
+        if changed { save() }
     }
 
     private func clearSetAside(_ mr: TrackedMR) {

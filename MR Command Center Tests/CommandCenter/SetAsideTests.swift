@@ -95,7 +95,7 @@ struct SetAsideTests {
         #expect(center.situation(for: other).lane == .inFlight)
     }
 
-    @Test func leavingYourMoveOnItsOwnClearsItQuietly() async throws {
+    @Test func outOfYourMoveItShowsInItsOwnLaneAndStaysSetAsideQuietly() async throws {
         await app.refresh(.automatic)
         let other = try #require(app.mergeRequests.trackedMergeRequests.first { center.situation(for: $0).lane == .inFlight })
         other.setAsideAt = .now
@@ -104,8 +104,9 @@ struct SetAsideTests {
 
         center.releaseSetAside()
 
-        #expect(other.setAsideAt == nil)
-        #expect(try events(.broughtBack, for: other).isEmpty, "It isn't back in Your move, so nothing to announce")
+        #expect(center.situation(for: other).lane == .inFlight, "Nothing to park while it isn't your move")
+        #expect(other.setAsideAt != nil, "Kept, in case the same reason comes back")
+        #expect(try events(.broughtBack, for: other).isEmpty)
     }
 
     @Test func aPushSeenOnRefreshBringsItBackAndSaysSo() async throws {
@@ -130,6 +131,68 @@ struct SetAsideTests {
         #expect(center.situation(for: mr).lane == .yourMove)
         #expect(mr.setAsideAt == nil)
         #expect(try events(.broughtBack, for: mr).count == 1)
+    }
+
+    @Test func fewerThreadsWaitingIsNotNew() async throws {
+        let mr = try await loaded()
+        mr.threadsAwaitingMe = 2
+        let newest = try #require(mr.lastReplyToMeAt)
+        center.setAside(mr)
+        #expect(center.situation(for: mr).headline.contains("2 threads"))
+
+        // The newest thread was resolved: one fewer waiting, and the latest reply is older.
+        mr.threadsAwaitingMe = 1
+        mr.lastReplyToMeAt = newest.addingTimeInterval(-3600)
+        center.releaseSetAside()
+
+        #expect(center.situation(for: mr).lane == .setAside)
+        #expect(mr.setAsideAt != nil)
+    }
+
+    @Test func aDifferentReasonBringsItBack() async throws {
+        let mr = try await loaded()
+        center.setAside(mr)
+
+        // The threads were answered, and now it's waiting on your approval instead.
+        mr.threadsAwaitingMe = 0
+        mr.threadsAwaitingOthers = 0
+        let natural = MRSituation.ignoringSetAside(for: mr, me: app.mergeRequests.username, rule: nil)
+        try #require(natural.yourMoveReason == .approval)
+        center.releaseSetAside()
+
+        #expect(center.situation(for: mr).lane == .yourMove)
+        #expect(mr.setAsideAt == nil)
+        #expect(try events(.broughtBack, for: mr).count == 1)
+    }
+
+    /// A pipeline rerun on the same commit, or GitLab rechecking conflicts, takes the MR out of
+    /// Your move for a refresh or two. That's not news, so it must still be set aside after.
+    @Test func aPassingStateDoesntReleaseIt() async throws {
+        await app.refresh(.automatic)
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first {
+            let reason = center.situation(for: $0).yourMoveReason
+            return reason == .pipeline || reason == .conflicts
+        })
+        let reason = try #require(center.situation(for: mr).yourMoveReason)
+        center.setAside(mr)
+        let pipeline = mr.pipelineStatusRaw, conflicts = mr.hasConflicts, status = mr.detailedMergeStatus
+
+        if reason == .pipeline {
+            mr.pipelineStatusRaw = PipelineStatus.running.rawValue
+        } else {
+            mr.hasConflicts = false
+            mr.detailedMergeStatus = "checking"
+        }
+        #expect(center.situation(for: mr).lane != .yourMove, "Out of Your move while it reruns")
+        center.releaseSetAside()
+        #expect(mr.setAsideAt != nil, "Still set aside")
+
+        mr.pipelineStatusRaw = pipeline
+        mr.hasConflicts = conflicts
+        mr.detailedMergeStatus = status
+        center.releaseSetAside()
+        #expect(center.situation(for: mr).lane == .setAside)
+        #expect(try events(.broughtBack, for: mr).isEmpty)
     }
 
     @Test func settingAsideDoesntMarkItUnseen() async throws {
@@ -180,11 +243,6 @@ struct SetAsideRuleTests {
         #expect(!MRSituation.isStillSetAside(parked(), reason: .approval))
     }
 
-    @Test func fewerThreadsWaitingIsNotNew() {
-        // Someone resolved one of two threads: the headline count changes, the reason doesn't.
-        #expect(MRSituation.isStillSetAside(parked(), reason: .threads))
-    }
-
     @Test func aReplyWrittenBeforeSettingAsideButFetchedAfterIsNew() {
         // GitLab time 950 is before the local set-aside time (1000), but you never saw it.
         let mr = parked()
@@ -192,10 +250,15 @@ struct SetAsideRuleTests {
         #expect(!MRSituation.isStillSetAside(mr, reason: .threads))
     }
 
-    @Test func aFirstReplyWhenThereWasNoneIsNew() {
+    @Test func anUnknownReplyTimeIsNotTakenAsNew() {
+        // A store from before reply times were kept: the first time we learn isn't news.
         let mr = parked()
         mr.setAsideReplyAt = nil
-        #expect(!MRSituation.isStillSetAside(mr, reason: .threads))
+        #expect(MRSituation.isStillSetAside(mr, reason: .threads))
+    }
+
+    @Test func outOfYourMoveForAWhileIsNotNew() {
+        #expect(!MRSituation.somethingNewSinceSetAside(parked(), reason: nil))
     }
 
     @Test func neverSetAsideIsntParked() {
