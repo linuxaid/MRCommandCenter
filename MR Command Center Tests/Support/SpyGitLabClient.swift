@@ -15,6 +15,8 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var lastDiscussionRequest: NewDiffDiscussionRequest?
         var lastGeneralBody: String?
         var mergeFailure: APIError?
+        /// Fails merges of just these MRs (by iid), on top of `mergeFailure`.
+        var mergeFailuresByIID: [Int: APIError] = [:]
         var merges: [MergeOptions] = []
     }
 
@@ -69,7 +71,7 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
 
     func merge(projectID: Int, iid: Int, options: MergeOptions) async throws -> GitLabMergeRequest {
         record("merge")
-        if let failure = state.withLock({ $0.mergeFailure }) { throw failure }
+        if let failure = state.withLock({ $0.mergeFailure ?? $0.mergeFailuresByIID[iid] }) { throw failure }
         let client = mock
         let merged = try await client.merge(projectID: projectID, iid: iid, options: options)
         edit { state in

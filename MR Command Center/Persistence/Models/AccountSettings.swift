@@ -52,6 +52,9 @@ final class AccountSettings {
     var postCommentsEnabled: Bool = false
     /// The master switch for merge rules. Off: rules run as a dry run and only report what they'd merge.
     var autoMergeEnabled: Bool = false
+    /// Merge MRs you're reviewing (not ones you opened) as soon as they're ready, without a rule.
+    /// Its own opt-in: it merges for real even while merge rules are a dry run.
+    var mergeReadyReviewsAutomatically: Bool = false
     var notifyNewReviewRequests: Bool = false
     var notifyPipelineFailures: Bool = false
 

@@ -135,7 +135,26 @@ private struct LaneTitle: View {
                 .foregroundStyle(Theme.ink)
             Text(lane.subtitle)
                 .foregroundStyle(Theme.inkSecondary)
+            if lane == .readyToMerge || lane == .autoMerge {
+                MergeReadyReviewsToggle()
+                    .controlSize(.small)
+                    .padding(.top, 4)
+            }
         }
+    }
+}
+
+/// The switch for merging ready MRs you're reviewing (issue #7). On a lane page and the Merge Rules page.
+struct MergeReadyReviewsToggle: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let center = appModel.commandCenter
+        Toggle("Merge ready MRs I'm reviewing automatically",
+               isOn: Binding(get: { center.mergesReadyReviews }, set: { center.setMergesReadyReviews($0) }))
+            .toggleStyle(.switch)
+            .tint(Theme.autoMerge)
+            .help("On the next refresh, merges each MR you're reviewing that's in Ready to merge, at the commit that was checked, with your last squash and delete-branch choices. It merges for real even while rules are a dry run. MRs you opened, and ones your merge rules cover, are left alone.")
     }
 }
 

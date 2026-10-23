@@ -76,6 +76,11 @@ private struct MasterSwitch: View {
         }
         .padding(16)
         .card(isSelected: isOn, accent: Theme.autoMerge)
+        MergeReadyReviewsToggle()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card(isSelected: center.mergesReadyReviews, accent: Theme.autoMerge)
     }
 }
 

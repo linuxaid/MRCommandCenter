@@ -75,10 +75,10 @@ struct CommandSidebar: View {
                 Image(systemName: "wand.and.stars").foregroundStyle(Theme.autoMerge)
             }
             Spacer()
-            if center.hasEnabledRules {
-                Text(center.isAutoMergeLive ? "On" : "Dry run")
+            if let badge = center.autoMergeBadge {
+                Text(badge)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(center.isAutoMergeLive ? Theme.autoMerge : Theme.inkTertiary)
+                    .foregroundStyle(badge == "Dry run" ? Theme.inkTertiary : Theme.autoMerge)
             }
         }
         .tag(Destination.rules)
