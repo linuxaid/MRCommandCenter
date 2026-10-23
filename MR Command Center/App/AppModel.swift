@@ -61,6 +61,7 @@ final class AppModel {
         await mergeRequests.refresh(trigger)
         await jira.refresh(for: mergeRequests.trackedMergeRequests, trigger: trigger)
         await staticChecks.evaluateMissing(mergeRequests.trackedMergeRequests)
+        commandCenter.releaseSetAside()
         await commandCenter.runRules()
     }
 

@@ -37,6 +37,15 @@ struct TriageView: View {
                         .buttonStyle(.link)
                         .foregroundStyle(Theme.inkSecondary)
                     }
+                    if destination == .briefing, let parked = lanes[.setAside], !parked.isEmpty {
+                        Button {
+                            center.destination = .lane(.setAside)
+                        } label: {
+                            Label("\(parked.count) set aside", systemImage: Lane.setAside.systemImage)
+                        }
+                        .buttonStyle(.link)
+                        .foregroundStyle(Theme.inkSecondary)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 22)
@@ -177,6 +186,7 @@ private struct LaneSection: View {
         case .autoMerge: "No merge rule covers an open MR. Create one under Merge Rules."
         case .inFlight: "Nothing in flight."
         case .drafts: "No drafts."
+        case .setAside: "Nothing set aside. Right-click an MR in Your move to park it until something new happens."
         }
     }
 }
@@ -268,6 +278,15 @@ private struct RowMenu: View {
         }
         Button("Merge…") { appModel.commandCenter.requestMerge(mr) }
             .disabled(mr.isDraft || !mr.hasLoadedDetails)
+        Divider()
+        switch appModel.commandCenter.situation(for: mr).lane {
+        case .yourMove:
+            Button("Set Aside") { appModel.commandCenter.setAside(mr) }
+        case .setAside:
+            Button("Bring Back to Your Move") { appModel.commandCenter.bringBack(mr) }
+        default:
+            EmptyView()
+        }
         Divider()
         if let url = URL(string: mr.webURL) {
             Button("Open in GitLab") { NSWorkspace.shared.open(url) }

@@ -128,6 +128,47 @@ final class CommandCenter {
     func selectNext() { store.moveSelection(by: 1, in: orderedKeys(for: destination)) }
     func selectPrevious() { store.moveSelection(by: -1, in: orderedKeys(for: destination)) }
 
+    // MARK: Set aside
+
+    /// Parks a Your move MR in the Set aside lane until something new happens on it.
+    /// Local only: nothing is sent to GitLab.
+    func setAside(_ mr: TrackedMR) {
+        let situation = situation(for: mr)
+        guard situation.lane == .yourMove else { return }
+        mr.setAsideAt = .now
+        mr.setAsideSHA = mr.headSHA
+        mr.setAsideReason = situation.headline
+        store.record(.init(kind: .setAside, message: "You set this aside: \(situation.headline)"), for: mr)
+        save()
+    }
+
+    /// Puts a set-aside MR back in Your move right away.
+    func bringBack(_ mr: TrackedMR) {
+        guard mr.setAsideAt != nil else { return }
+        clearSetAside(mr)
+        store.record(.init(kind: .broughtBack, message: "You brought this back to Your move"), for: mr)
+        save()
+    }
+
+    /// After a refresh: MRs where something new happened leave Set aside for good, so a later
+    /// coincidence (the same reason again) can't park them a second time.
+    func releaseSetAside() {
+        for mr in store.trackedMergeRequests where mr.setAsideAt != nil && situation(for: mr).lane != .setAside {
+            let isBack = situation(for: mr).lane == .yourMove
+            clearSetAside(mr)
+            if isBack {
+                store.record(.init(kind: .broughtBack, message: "Something new happened, so it's back in Your move"), for: mr)
+            }
+        }
+        save()
+    }
+
+    private func clearSetAside(_ mr: TrackedMR) {
+        mr.setAsideAt = nil
+        mr.setAsideSHA = nil
+        mr.setAsideReason = nil
+    }
+
     // MARK: Rules
 
     func reloadRules() {

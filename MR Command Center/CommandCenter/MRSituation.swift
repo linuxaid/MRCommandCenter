@@ -2,7 +2,7 @@ import Foundation
 
 /// Where an MR sits from your point of view. Every open MR is in exactly one lane.
 enum Lane: String, CaseIterable, Identifiable {
-    case yourMove, readyToMerge, autoMerge, inFlight, drafts
+    case yourMove, readyToMerge, autoMerge, inFlight, drafts, setAside
 
     var id: Self { self }
 
@@ -13,6 +13,7 @@ enum Lane: String, CaseIterable, Identifiable {
         case .autoMerge: "Merging on its own"
         case .inFlight: "In flight"
         case .drafts: "Drafts"
+        case .setAside: "Set aside"
         }
     }
 
@@ -23,6 +24,7 @@ enum Lane: String, CaseIterable, Identifiable {
         case .autoMerge: "A merge rule or GitLab will merge these when they're ready"
         case .inFlight: "Moving along without you"
         case .drafts: "Not ready for review yet"
+        case .setAside: "Your move, parked until something new happens"
         }
     }
 
@@ -33,6 +35,7 @@ enum Lane: String, CaseIterable, Identifiable {
         case .autoMerge: "wand.and.stars"
         case .inFlight: "airplane"
         case .drafts: "pencil.line"
+        case .setAside: "tray.and.arrow.down"
         }
     }
 }
@@ -83,7 +86,26 @@ struct MRSituation: Equatable {
     let readiness: Readiness
     let rule: RuleStatus?
 
+    /// Like `ignoringSetAside`, except a Your move MR you set aside sits in its own lane until
+    /// something new happens on it.
     static func make(for mr: TrackedMR, me: String?, rule: RuleStatus?) -> MRSituation {
+        let natural = ignoringSetAside(for: mr, me: me, rule: rule)
+        guard natural.lane == .yourMove, isStillSetAside(mr, reason: natural.headline) else { return natural }
+        return MRSituation(lane: .setAside, headline: "Set aside: \(natural.headline)", ballWith: .you,
+                           notes: natural.notes + ["It comes back to Your move when something new happens"],
+                           readiness: natural.readiness, rule: natural.rule)
+    }
+
+    /// A set-aside MR stays parked while nothing has changed since: the same commit, the same
+    /// reason it needed you, and no reply to you newer than when you set it aside.
+    static func isStillSetAside(_ mr: TrackedMR, reason: String) -> Bool {
+        guard let setAsideAt = mr.setAsideAt else { return false }
+        let noNewReply = mr.lastReplyToMeAt.map { $0 <= setAsideAt } ?? true
+        return mr.setAsideSHA == mr.headSHA && mr.setAsideReason == reason && noNewReply
+    }
+
+    /// Where the MR would be if you hadn't set it aside.
+    static func ignoringSetAside(for mr: TrackedMR, me: String?, rule: RuleStatus?) -> MRSituation {
         let readiness = Readiness(mr)
         let author = firstName(mr.authorName)
         let pipeline = readiness.step(.pipeline)

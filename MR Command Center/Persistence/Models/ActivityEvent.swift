@@ -42,5 +42,7 @@ nonisolated enum ActivityKind: String, Codable, Sendable, CaseIterable {
     case autoMerged
     case autoMergeWouldMerge
     case autoMergeFailed
+    case setAside
+    case broughtBack
     case other
 }
