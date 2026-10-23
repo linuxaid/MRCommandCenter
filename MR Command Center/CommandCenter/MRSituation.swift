@@ -75,6 +75,12 @@ struct RuleStatus: Equatable {
     var isReady: Bool { unmet.isEmpty }
 }
 
+/// Why an MR is your move. Stable across refreshes (unlike the headline, which has names and
+/// counts), so setting an MR aside can tell a new reason from the same one reworded.
+enum YourMoveReason: String {
+    case threads, pipeline, conflicts, approval
+}
+
 /// The answer to "what's happening with this MR, and do I need to do anything?"
 struct MRSituation: Equatable {
     let lane: Lane
@@ -85,23 +91,32 @@ struct MRSituation: Equatable {
     let notes: [String]
     let readiness: Readiness
     let rule: RuleStatus?
+    /// Set when the lane is Your move (or Set aside).
+    var yourMoveReason: YourMoveReason?
 
     /// Like `ignoringSetAside`, except a Your move MR you set aside sits in its own lane until
     /// something new happens on it.
     static func make(for mr: TrackedMR, me: String?, rule: RuleStatus?) -> MRSituation {
         let natural = ignoringSetAside(for: mr, me: me, rule: rule)
-        guard natural.lane == .yourMove, isStillSetAside(mr, reason: natural.headline) else { return natural }
+        guard natural.lane == .yourMove, let reason = natural.yourMoveReason,
+              isStillSetAside(mr, reason: reason) else { return natural }
         return MRSituation(lane: .setAside, headline: "Set aside: \(natural.headline)", ballWith: .you,
                            notes: natural.notes + ["It comes back to Your move when something new happens"],
-                           readiness: natural.readiness, rule: natural.rule)
+                           readiness: natural.readiness, rule: natural.rule, yourMoveReason: reason)
     }
 
     /// A set-aside MR stays parked while nothing has changed since: the same commit, the same
-    /// reason it needed you, and no reply to you newer than when you set it aside.
-    static func isStillSetAside(_ mr: TrackedMR, reason: String) -> Bool {
-        guard let setAsideAt = mr.setAsideAt else { return false }
-        let noNewReply = mr.lastReplyToMeAt.map { $0 <= setAsideAt } ?? true
-        return mr.setAsideSHA == mr.headSHA && mr.setAsideReason == reason && noNewReply
+    /// kind of reason it needed you, and no reply to you newer than the newest one you'd seen.
+    /// Replies compare GitLab's timestamps with each other, never with this Mac's clock.
+    static func isStillSetAside(_ mr: TrackedMR, reason: YourMoveReason) -> Bool {
+        guard mr.setAsideAt != nil else { return false }
+        let noNewReply: Bool
+        if let latest = mr.lastReplyToMeAt {
+            noNewReply = mr.setAsideReplyAt.map { latest <= $0 } ?? false
+        } else {
+            noNewReply = true
+        }
+        return mr.setAsideSHA == mr.headSHA && mr.setAsideReason == reason.rawValue && noNewReply
     }
 
     /// Where the MR would be if you hadn't set it aside.
@@ -113,8 +128,9 @@ struct MRSituation: Equatable {
         let iApproved = me.map { mr.approvedByUsernames.contains($0) } ?? false
         var notes: [String] = []
 
-        func situation(_ lane: Lane, _ headline: String, _ party: Party) -> MRSituation {
-            MRSituation(lane: lane, headline: headline, ballWith: party, notes: notes, readiness: readiness, rule: rule)
+        func situation(_ lane: Lane, _ headline: String, _ party: Party, _ reason: YourMoveReason? = nil) -> MRSituation {
+            MRSituation(lane: lane, headline: headline, ballWith: party, notes: notes, readiness: readiness, rule: rule,
+                        yourMoveReason: reason)
         }
 
         if mr.threadsAwaitingOthers > 0 {
@@ -138,18 +154,18 @@ struct MRSituation: Equatable {
             let headline = mr.threadsAwaitingMe == 1
                 ? (mr.isAuthor ? "\(who) left a comment for you" : "\(who) replied to your thread")
                 : "\(mr.threadsAwaitingMe) threads are waiting on your reply"
-            return situation(.yourMove, headline, .you)
+            return situation(.yourMove, headline, .you, .threads)
         }
         if mr.isAuthor {
             if pipeline.state == .blocked {
-                return situation(.yourMove, "Your pipeline \(pipeline.summary.lowercased())", .you)
+                return situation(.yourMove, "Your pipeline \(pipeline.summary.lowercased())", .you, .pipeline)
             }
             if mergeable.state == .blocked {
-                return situation(.yourMove, mergeable.summary, .you)
+                return situation(.yourMove, mergeable.summary, .you, .conflicts)
             }
         } else if mr.isReviewer, !iApproved, mr.hasLoadedDetails, !mr.approvalsMet,
                   pipeline.state != .blocked, mergeable.state != .blocked, mr.threadsAwaitingOthers == 0 {
-            return situation(.yourMove, "Waiting on your approval", .you)
+            return situation(.yourMove, "Waiting on your approval", .you, .approval)
         }
 
         // Ready, or about to be merged without anyone.

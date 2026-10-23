@@ -134,11 +134,12 @@ final class CommandCenter {
     /// Local only: nothing is sent to GitLab.
     func setAside(_ mr: TrackedMR) {
         let situation = situation(for: mr)
-        guard situation.lane == .yourMove else { return }
+        guard situation.lane == .yourMove, let reason = situation.yourMoveReason else { return }
         mr.setAsideAt = .now
         mr.setAsideSHA = mr.headSHA
-        mr.setAsideReason = situation.headline
-        store.record(.init(kind: .setAside, message: "You set this aside: \(situation.headline)"), for: mr)
+        mr.setAsideReason = reason.rawValue
+        mr.setAsideReplyAt = mr.lastReplyToMeAt
+        recordOwn(.init(kind: .setAside, message: "You set this aside: \(situation.headline)"), for: mr)
         save()
     }
 
@@ -146,27 +147,38 @@ final class CommandCenter {
     func bringBack(_ mr: TrackedMR) {
         guard mr.setAsideAt != nil else { return }
         clearSetAside(mr)
-        store.record(.init(kind: .broughtBack, message: "You brought this back to Your move"), for: mr)
+        recordOwn(.init(kind: .broughtBack, message: "You brought this back to Your move"), for: mr)
         save()
+    }
+
+    /// Something you just did: it goes in Activity without marking the MR as having news.
+    private func recordOwn(_ change: ActivityDetector.Change, for mr: TrackedMR) {
+        let alreadySeen = !mr.hasUnseenActivity
+        store.record(change, for: mr)
+        if alreadySeen { mr.seenAt = mr.lastActivityAt }
     }
 
     /// After a refresh: MRs where something new happened leave Set aside for good, so a later
     /// coincidence (the same reason again) can't park them a second time.
     func releaseSetAside() {
-        for mr in store.trackedMergeRequests where mr.setAsideAt != nil && situation(for: mr).lane != .setAside {
-            let isBack = situation(for: mr).lane == .yourMove
+        var released = false
+        for mr in store.trackedMergeRequests where mr.setAsideAt != nil {
+            let lane = situation(for: mr).lane
+            guard lane != .setAside else { continue }
             clearSetAside(mr)
-            if isBack {
+            released = true
+            if lane == .yourMove {
                 store.record(.init(kind: .broughtBack, message: "Something new happened, so it's back in Your move"), for: mr)
             }
         }
-        save()
+        if released { save() }
     }
 
     private func clearSetAside(_ mr: TrackedMR) {
         mr.setAsideAt = nil
         mr.setAsideSHA = nil
         mr.setAsideReason = nil
+        mr.setAsideReplyAt = nil
     }
 
     // MARK: Rules

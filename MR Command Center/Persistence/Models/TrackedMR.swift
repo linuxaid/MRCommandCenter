@@ -69,11 +69,13 @@ final class TrackedMR {
     /// Merge rules: the head SHA last acted on (merged, attempted, or reported in dry run), and the last failure.
     var autoMergeHandledSHA: String?
     var autoMergeError: String?
-    /// You set it aside from Your move: when, at which commit, and the reason it needed you then.
-    /// Kept in the app only; GitLab never hears about it.
+    /// You set it aside from Your move: when, at which commit, why it needed you then
+    /// (`YourMoveReason`), and the newest reply to you you'd seen. Kept in the app only;
+    /// GitLab never hears about it.
     var setAsideAt: Date?
     var setAsideSHA: String?
     var setAsideReason: String?
+    var setAsideReplyAt: Date?
     var firstSeenAt: Date
     var lastRefreshedAt: Date?
     /// Set when the most recent detail fetch for this MR failed.
@@ -267,6 +269,7 @@ nonisolated struct ThreadTurns: Equatable {
                 lastReplyFrom = lastAuthor.name
             }
         }
-        latestReplyAt = latestReply
+        // A reply without a date can't be compared, so it doesn't count as one.
+        latestReplyAt = latestReply == .distantPast ? nil : latestReply
     }
 }

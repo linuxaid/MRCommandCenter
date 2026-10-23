@@ -75,6 +75,14 @@ struct BriefPanel: View {
                 Label("Review Here", systemImage: "rectangle.split.2x1")
             }
             .help("Brief and changes side by side in this window (Return or ⌘↩)")
+            if center.situation(for: mr).lane == .setAside {
+                Button {
+                    center.bringBack(mr)
+                } label: {
+                    Label("Bring Back", systemImage: Lane.setAside.systemImage)
+                }
+                .help("Put it back in Your move now")
+            }
             Spacer()
             if let url = URL(string: mr.webURL) {
                 Button {
