@@ -56,8 +56,9 @@ final class TrackedMR {
     /// Unresolved threads where someone else spoke last and you're involved
     /// (you commented in it, or it's your MR).
     var threadsAwaitingMe: Int = 0
-    /// Who spoke last in the most recent thread waiting on you.
+    /// Who spoke last in the most recent thread waiting on you, and when.
     var lastReplyFrom: String?
+    var lastReplyToMeAt: Date?
     /// Unresolved threads where you spoke last.
     var threadsAwaitingOthers: Int = 0
     /// When the head commit last changed (new pushes), for merge rules' quiet period.
@@ -68,6 +69,13 @@ final class TrackedMR {
     /// Merge rules: the head SHA last acted on (merged, attempted, or reported in dry run), and the last failure.
     var autoMergeHandledSHA: String?
     var autoMergeError: String?
+    /// You set it aside from Your move: when, at which commit, why it needed you then
+    /// (`YourMoveReason`), and the newest reply to you you'd seen. Kept in the app only;
+    /// GitLab never hears about it.
+    var setAsideAt: Date?
+    var setAsideSHA: String?
+    var setAsideReason: String?
+    var setAsideReplyAt: Date?
     var firstSeenAt: Date
     var lastRefreshedAt: Date?
     /// Set when the most recent detail fetch for this MR failed.
@@ -225,6 +233,7 @@ extension TrackedMR {
         threadsAwaitingMe = turns.awaitingMe
         threadsAwaitingOthers = turns.awaitingOthers
         lastReplyFrom = turns.lastReplyFrom
+        lastReplyToMeAt = turns.latestReplyAt
     }
 }
 
@@ -239,6 +248,7 @@ nonisolated struct ThreadTurns: Equatable {
     var awaitingMe = 0
     var awaitingOthers = 0
     var lastReplyFrom: String?
+    var latestReplyAt: Date?
 
     init(discussions: [GitLabDiscussion], me: String?, isMyMR: Bool) {
         guard let me else { return }
@@ -259,5 +269,7 @@ nonisolated struct ThreadTurns: Equatable {
                 lastReplyFrom = lastAuthor.name
             }
         }
+        // A reply without a date can't be compared, so it doesn't count as one.
+        latestReplyAt = latestReply == .distantPast ? nil : latestReply
     }
 }

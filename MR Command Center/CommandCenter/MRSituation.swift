@@ -2,7 +2,7 @@ import Foundation
 
 /// Where an MR sits from your point of view. Every open MR is in exactly one lane.
 enum Lane: String, CaseIterable, Identifiable {
-    case yourMove, readyToMerge, autoMerge, inFlight, drafts
+    case yourMove, readyToMerge, autoMerge, inFlight, drafts, setAside
 
     var id: Self { self }
 
@@ -13,6 +13,7 @@ enum Lane: String, CaseIterable, Identifiable {
         case .autoMerge: "Merging on its own"
         case .inFlight: "In flight"
         case .drafts: "Drafts"
+        case .setAside: "Set aside"
         }
     }
 
@@ -23,6 +24,7 @@ enum Lane: String, CaseIterable, Identifiable {
         case .autoMerge: "A merge rule or GitLab will merge these when they're ready"
         case .inFlight: "Moving along without you"
         case .drafts: "Not ready for review yet"
+        case .setAside: "Your move, parked until something new happens"
         }
     }
 
@@ -33,6 +35,7 @@ enum Lane: String, CaseIterable, Identifiable {
         case .autoMerge: "wand.and.stars"
         case .inFlight: "airplane"
         case .drafts: "pencil.line"
+        case .setAside: "tray.and.arrow.down"
         }
     }
 }
@@ -72,6 +75,12 @@ struct RuleStatus: Equatable {
     var isReady: Bool { unmet.isEmpty }
 }
 
+/// Why an MR is your move. Stable across refreshes (unlike the headline, which has names and
+/// counts), so setting an MR aside can tell a new reason from the same one reworded.
+enum YourMoveReason: String {
+    case threads, pipeline, conflicts, approval
+}
+
 /// The answer to "what's happening with this MR, and do I need to do anything?"
 struct MRSituation: Equatable {
     let lane: Lane
@@ -82,8 +91,39 @@ struct MRSituation: Equatable {
     let notes: [String]
     let readiness: Readiness
     let rule: RuleStatus?
+    /// Set when the lane is Your move (or Set aside).
+    var yourMoveReason: YourMoveReason?
 
+    /// Like `ignoringSetAside`, except a Your move MR you set aside sits in its own lane until
+    /// something new happens on it.
     static func make(for mr: TrackedMR, me: String?, rule: RuleStatus?) -> MRSituation {
+        let natural = ignoringSetAside(for: mr, me: me, rule: rule)
+        guard natural.lane == .yourMove, let reason = natural.yourMoveReason,
+              isStillSetAside(mr, reason: reason) else { return natural }
+        return MRSituation(lane: .setAside, headline: "Set aside: \(natural.headline)", ballWith: .you,
+                           notes: natural.notes + ["It comes back to Your move when something new happens"],
+                           readiness: natural.readiness, rule: natural.rule, yourMoveReason: reason)
+    }
+
+    /// A set-aside MR stays parked until something new happens (see `somethingNewSinceSetAside`).
+    static func isStillSetAside(_ mr: TrackedMR, reason: YourMoveReason) -> Bool {
+        mr.setAsideAt != nil && !somethingNewSinceSetAside(mr, reason: reason)
+    }
+
+    /// The only things that end a set aside: a new commit, a reply to you newer than the newest
+    /// one you'd seen (GitLab time against GitLab time, never this Mac's clock), or Your move
+    /// again for a different kind of reason. `reason` is why it's your move now, or nil if it
+    /// isn't right now. A passing state on its own (GitLab rechecking mergeability, a pipeline
+    /// rerunning on the same commit) is not new, and neither is a thread count dropping.
+    static func somethingNewSinceSetAside(_ mr: TrackedMR, reason: YourMoveReason?) -> Bool {
+        if mr.setAsideSHA != mr.headSHA { return true }
+        if let latest = mr.lastReplyToMeAt, let seen = mr.setAsideReplyAt, latest > seen { return true }
+        if let reason, reason.rawValue != mr.setAsideReason { return true }
+        return false
+    }
+
+    /// Where the MR would be if you hadn't set it aside.
+    static func ignoringSetAside(for mr: TrackedMR, me: String?, rule: RuleStatus?) -> MRSituation {
         let readiness = Readiness(mr)
         let author = firstName(mr.authorName)
         let pipeline = readiness.step(.pipeline)
@@ -91,8 +131,9 @@ struct MRSituation: Equatable {
         let iApproved = me.map { mr.approvedByUsernames.contains($0) } ?? false
         var notes: [String] = []
 
-        func situation(_ lane: Lane, _ headline: String, _ party: Party) -> MRSituation {
-            MRSituation(lane: lane, headline: headline, ballWith: party, notes: notes, readiness: readiness, rule: rule)
+        func situation(_ lane: Lane, _ headline: String, _ party: Party, _ reason: YourMoveReason? = nil) -> MRSituation {
+            MRSituation(lane: lane, headline: headline, ballWith: party, notes: notes, readiness: readiness, rule: rule,
+                        yourMoveReason: reason)
         }
 
         if mr.threadsAwaitingOthers > 0 {
@@ -116,18 +157,18 @@ struct MRSituation: Equatable {
             let headline = mr.threadsAwaitingMe == 1
                 ? (mr.isAuthor ? "\(who) left a comment for you" : "\(who) replied to your thread")
                 : "\(mr.threadsAwaitingMe) threads are waiting on your reply"
-            return situation(.yourMove, headline, .you)
+            return situation(.yourMove, headline, .you, .threads)
         }
         if mr.isAuthor {
             if pipeline.state == .blocked {
-                return situation(.yourMove, "Your pipeline \(pipeline.summary.lowercased())", .you)
+                return situation(.yourMove, "Your pipeline \(pipeline.summary.lowercased())", .you, .pipeline)
             }
             if mergeable.state == .blocked {
-                return situation(.yourMove, mergeable.summary, .you)
+                return situation(.yourMove, mergeable.summary, .you, .conflicts)
             }
         } else if mr.isReviewer, !iApproved, mr.hasLoadedDetails, !mr.approvalsMet,
                   pipeline.state != .blocked, mergeable.state != .blocked, mr.threadsAwaitingOthers == 0 {
-            return situation(.yourMove, "Waiting on your approval", .you)
+            return situation(.yourMove, "Waiting on your approval", .you, .approval)
         }
 
         // Ready, or about to be merged without anyone.

@@ -128,6 +128,65 @@ final class CommandCenter {
     func selectNext() { store.moveSelection(by: 1, in: orderedKeys(for: destination)) }
     func selectPrevious() { store.moveSelection(by: -1, in: orderedKeys(for: destination)) }
 
+    // MARK: Set aside
+
+    /// Parks a Your move MR in the Set aside lane until something new happens on it.
+    /// Local only: nothing is sent to GitLab.
+    func setAside(_ mr: TrackedMR) {
+        let situation = situation(for: mr)
+        guard situation.lane == .yourMove, let reason = situation.yourMoveReason else { return }
+        mr.setAsideAt = .now
+        mr.setAsideSHA = mr.headSHA
+        mr.setAsideReason = reason.rawValue
+        mr.setAsideReplyAt = mr.lastReplyToMeAt
+        recordOwn(.init(kind: .setAside, message: "You set this aside: \(situation.headline)"), for: mr)
+        save()
+    }
+
+    /// Puts a set-aside MR back in Your move right away.
+    func bringBack(_ mr: TrackedMR) {
+        guard mr.setAsideAt != nil else { return }
+        clearSetAside(mr)
+        recordOwn(.init(kind: .broughtBack, message: "You brought this back to Your move"), for: mr)
+        save()
+    }
+
+    /// Something you just did: it goes in Activity without marking the MR as having news.
+    private func recordOwn(_ change: ActivityDetector.Change, for mr: TrackedMR) {
+        let alreadySeen = !mr.hasUnseenActivity
+        store.record(change, for: mr)
+        if alreadySeen { mr.seenAt = mr.lastActivityAt }
+    }
+
+    /// After a refresh: MRs where something new happened leave Set aside for good, so the same
+    /// reason coming round again can't park them a second time. An MR that's only out of Your
+    /// move for a while (a pipeline rerunning, GitLab rechecking conflicts) stays set aside.
+    func releaseSetAside() {
+        var changed = false
+        for mr in store.trackedMergeRequests where mr.setAsideAt != nil {
+            // Stores from before reply times were kept: take the first one we learn as already seen.
+            if mr.setAsideReplyAt == nil, let latest = mr.lastReplyToMeAt {
+                mr.setAsideReplyAt = latest
+                changed = true
+            }
+            let natural = MRSituation.ignoringSetAside(for: mr, me: store.username, rule: ruleStatus(for: mr))
+            guard MRSituation.somethingNewSinceSetAside(mr, reason: natural.yourMoveReason) else { continue }
+            clearSetAside(mr)
+            changed = true
+            if natural.lane == .yourMove {
+                store.record(.init(kind: .broughtBack, message: "Something new happened, so it's back in Your move"), for: mr)
+            }
+        }
+        if changed { save() }
+    }
+
+    private func clearSetAside(_ mr: TrackedMR) {
+        mr.setAsideAt = nil
+        mr.setAsideSHA = nil
+        mr.setAsideReason = nil
+        mr.setAsideReplyAt = nil
+    }
+
     // MARK: Rules
 
     func reloadRules() {

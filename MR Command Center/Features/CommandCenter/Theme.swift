@@ -26,6 +26,7 @@ enum Theme {
         case .autoMerge: autoMerge
         case .inFlight: inFlight
         case .drafts: draft
+        case .setAside: inkTertiary
         }
     }
 
@@ -45,7 +46,8 @@ enum Theme {
         case .replied: yourMove
         case .autoMerged, .autoMergeWouldMerge: autoMerge
         case .appeared, .pushed: inFlight
-        case .left, .other: inkTertiary
+        case .left, .other, .setAside: inkTertiary
+        case .broughtBack: yourMove
         }
     }
 
@@ -66,6 +68,8 @@ enum Theme {
         case .autoMerged: "wand.and.stars"
         case .autoMergeWouldMerge: "wand.and.rays"
         case .autoMergeFailed: "exclamationmark.octagon.fill"
+        case .setAside: "tray.and.arrow.down.fill"
+        case .broughtBack: "tray.and.arrow.up.fill"
         case .other: "circle.fill"
         }
     }
