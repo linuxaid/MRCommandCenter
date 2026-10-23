@@ -9,7 +9,7 @@ import Testing
 /// in a narrow window. A hit crashes the test run.
 @Suite(.serialized)
 struct LayoutStressTests {
-    @Test(arguments: [Destination.briefing, .lane(.yourMove), .activity, .rules])
+    @Test(arguments: [Destination.briefing, .lane(.yourMove), .lane(.readyToMerge), .activity, .rules])
     func resizingTheCommandCenterDoesNotLoop(destination: Destination) async throws {
         let model = AppModel.testing()
         await model.refresh(.automatic)

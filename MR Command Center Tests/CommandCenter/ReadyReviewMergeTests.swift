@@ -153,6 +153,72 @@ struct ReadyReviewMergeTests {
         #expect(try events(.autoMergeFailed, for: mr).count == 1)
         #expect(center.mergeFailures.map(\.mrKey) == [mr.key], "And as a banner")
         #expect(app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key })
+        #expect(center.situation(for: mr).lane == .readyToMerge, "Back where you'd merge it by hand")
+    }
+
+    @Test func aLaterSuccessClearsTheBanner() async throws {
+        let mr = try await loaded()
+        spy.edit { $0.mergeFailure = .server(status: 405) }
+        center.setMergesReadyReviews(true)
+        await center.runRules()
+        #expect(center.mergeFailures.count == 1)
+
+        // Something new is pushed and GitLab accepts it this time; the next refresh merges it.
+        spy.edit { state in
+            state.mergeFailure = nil
+            let index = state.data.entries.firstIndex { $0.detail.iid == mr.iid }!
+            var entry = state.data.entries[index]
+            let d = entry.detail
+            entry.detail = GitLabMergeRequest(
+                id: d.id, iid: d.iid, projectId: d.projectId, title: d.title, description: d.description, state: "opened",
+                createdAt: d.createdAt, updatedAt: d.updatedAt.addingTimeInterval(60),
+                sourceBranch: d.sourceBranch, targetBranch: d.targetBranch, author: d.author, labels: d.labels,
+                sha: String(repeating: "d", count: 40), references: d.references, webUrl: d.webUrl,
+                headPipeline: d.headPipeline
+            )
+            state.data.entries[index] = entry
+        }
+        await app.refresh(.manual)
+
+        #expect(spy.count("merge") == 2, "Tried again at the new commit")
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key })
+        #expect(center.mergeFailures.isEmpty)
+    }
+
+    @Test func aDryRunReportDoesntHoldBackARealMergeLater() async throws {
+        let mr = try await loaded()
+        let rule = center.addRule()
+        await center.runRules()
+        #expect(try events(.autoMergeWouldMerge, for: mr).count == 1)
+
+        rule.isEnabled = false
+        center.setMergesReadyReviews(true)
+        await center.runRules()
+
+        #expect(spy.count("merge") == 1)
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key })
+    }
+
+    @Test func withoutAGitLabAccountItSaysSoAndTriesAgainLater() async throws {
+        let mr = try await loaded()
+        AccountSettings.current(in: app.modelContainer.mainContext).gitLabBaseURL = ""
+        center.setMergesReadyReviews(true)
+
+        await center.runRules()
+
+        #expect(spy.count("merge") == 0)
+        #expect(mr.autoMergeError?.contains("GitLab account") == true)
+        #expect(mr.autoMergeHandledSHA == nil, "Not marked as tried")
+    }
+
+    @Test(arguments: [(false, false, false, nil), (true, false, false, "Dry run"), (true, true, false, "On"),
+                      (true, false, true, "Partly on"), (false, false, true, "On")] as [(Bool, Bool, Bool, String?)])
+    func sidebarBadge(rules: Bool, live: Bool, reviews: Bool, expected: String?) async throws {
+        await app.refresh(.automatic)
+        if rules { center.addRule() }
+        center.setAutoMergeLive(live)
+        center.setMergesReadyReviews(reviews)
+        #expect(center.autoMergeBadge == expected)
     }
 
     @Test func aReplyWaitingOnYouIsNotMergedEvenIfGitLabSaysMergeable() async throws {
@@ -211,7 +277,7 @@ struct ReadyReviewMergeTests {
         #expect(center.mergeFailures.map(\.mrKey) == [first.key])
     }
 
-    @Test func aFailureThatWillBeRetriedHasNoBannerAndASuccessClearsIt() async throws {
+    @Test func aFailureThatWillBeRetriedHasNoBannerAndIsRetried() async throws {
         let mr = try await loaded()
         spy.edit { $0.mergeFailure = .server(status: 409) }
         center.setMergesReadyReviews(true)
@@ -222,8 +288,7 @@ struct ReadyReviewMergeTests {
 
         spy.edit { $0.mergeFailure = nil }
         await center.runRules()
-        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key })
-        #expect(center.mergeFailures.isEmpty)
+        #expect(!app.mergeRequests.trackedMergeRequests.contains { $0.key == mr.key }, "The retry merged it")
     }
 
     @Test func turningItOffStopsIt() async throws {

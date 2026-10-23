@@ -126,7 +126,6 @@ private struct BriefingHeader: View {
 private struct LaneTitle: View {
     let lane: Lane
     let count: Int
-    @Environment(AppModel.self) private var appModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

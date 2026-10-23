@@ -116,6 +116,18 @@ final class CommandCenter {
     /// Where the merge sheet remembers squash and delete-branch. Tests pass their own.
     var mergeDefaults: UserDefaults = .standard
 
+    /// The sidebar's Merge Rules badge: what can merge for real right now.
+    var autoMergeBadge: String? {
+        let rulesLive = hasEnabledRules && isAutoMergeLive
+        switch (hasEnabledRules, rulesLive, mergesReadyReviews) {
+        case (_, true, _): return "On"
+        case (true, false, true): return "Partly on"
+        case (true, false, false): return "Dry run"
+        case (false, _, true): return "On"
+        case (false, _, false): return nil
+        }
+    }
+
     func setMergesReadyReviews(_ isOn: Bool) {
         settings.mergeReadyReviewsAutomatically = isOn
         save()
@@ -128,6 +140,8 @@ final class CommandCenter {
     private func readyReviewStatus(for mr: TrackedMR) -> RuleStatus? {
         guard mergesReadyReviews, mr.isReviewer, !mr.isAuthor, !mr.isDraft,
               MRSituation.ignoringSetAside(for: mr, me: store.username, rule: nil).lane == .readyToMerge else { return nil }
+        // Already tried at this commit and GitLab refused: it's back to Ready to merge, for you.
+        if mr.autoMergeHandledSHA == mr.headSHA, mr.autoMergeError != nil { return nil }
         return RuleStatus(ruleID: Self.readyReviewsRuleID, ruleName: Self.readyReviewsRuleName, unmet: [], isLive: true)
     }
 
@@ -434,19 +448,22 @@ final class CommandCenter {
         var mergedAny = false
 
         for mr in store.trackedMergeRequests where !mr.isDraft && !mergingKeys.contains(mr.key) {
-            guard let status = ruleStatus(for: mr, now: now), status.isReady,
-                  mr.autoMergeHandledSHA != mr.headSHA, !mr.headSHA.isEmpty else { continue }
+            guard let status = ruleStatus(for: mr, now: now), status.isReady, !mr.headSHA.isEmpty else { continue }
             let rule = rules.first(where: { $0.id == status.ruleID })
             let isReadyReview = status.ruleID == Self.readyReviewsRuleID
             guard rule != nil || isReadyReview else { continue }
-            mr.autoMergeHandledSHA = mr.headSHA
 
-            // Ready reviews have their own switch; only your rules follow the dry run.
+            // Ready reviews have their own switch; only your rules follow the dry run. Reports
+            // and real attempts are tracked apart, so a past report can't hold back a merge.
             guard isLive || isReadyReview else {
+                guard mr.autoMergeReportedSHA != mr.headSHA else { continue }
+                mr.autoMergeReportedSHA = mr.headSHA
                 store.record(.init(kind: .autoMergeWouldMerge,
                                    message: "Rule “\(status.ruleName)” would have merged this (dry run)"), for: mr)
                 continue
             }
+            guard mr.autoMergeHandledSHA != mr.headSHA else { continue }
+            mr.autoMergeHandledSHA = mr.headSHA
             if client == nil {
                 client = try? dependencies.gitLabClient(settings: settings)
             }

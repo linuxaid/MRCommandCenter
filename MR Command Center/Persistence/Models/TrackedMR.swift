@@ -69,6 +69,8 @@ final class TrackedMR {
     /// Merge rules: the head SHA last acted on (merged, attempted, or reported in dry run), and the last failure.
     var autoMergeHandledSHA: String?
     var autoMergeError: String?
+    /// The head SHA a dry run last reported, kept apart so a report never blocks a real merge later.
+    var autoMergeReportedSHA: String?
     /// You set it aside from Your move: when, at which commit, why it needed you then
     /// (`YourMoveReason`), and the newest reply to you you'd seen. Kept in the app only;
     /// GitLab never hears about it.

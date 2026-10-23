@@ -75,12 +75,10 @@ struct CommandSidebar: View {
                 Image(systemName: "wand.and.stars").foregroundStyle(Theme.autoMerge)
             }
             Spacer()
-            // "On" whenever something can merge for real: live rules, or ready reviews.
-            let isLive = (center.hasEnabledRules && center.isAutoMergeLive) || center.mergesReadyReviews
-            if isLive || center.hasEnabledRules {
-                Text(isLive ? "On" : "Dry run")
+            if let badge = center.autoMergeBadge {
+                Text(badge)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isLive ? Theme.autoMerge : Theme.inkTertiary)
+                    .foregroundStyle(badge == "Dry run" ? Theme.inkTertiary : Theme.autoMerge)
             }
         }
         .tag(Destination.rules)
