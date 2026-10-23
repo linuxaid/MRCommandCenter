@@ -169,12 +169,16 @@ struct ReadyReviewMergeTests {
             let index = state.data.entries.firstIndex { $0.detail.iid == mr.iid }!
             var entry = state.data.entries[index]
             let d = entry.detail
+            let newSHA = String(repeating: "d", count: 40)
+            // The push gets its own passing pipeline; one on the old commit wouldn't count.
+            var pipeline = d.headPipeline
+            pipeline?.sha = newSHA
             entry.detail = GitLabMergeRequest(
                 id: d.id, iid: d.iid, projectId: d.projectId, title: d.title, description: d.description, state: "opened",
                 createdAt: d.createdAt, updatedAt: d.updatedAt.addingTimeInterval(60),
                 sourceBranch: d.sourceBranch, targetBranch: d.targetBranch, author: d.author, labels: d.labels,
-                sha: String(repeating: "d", count: 40), references: d.references, webUrl: d.webUrl,
-                headPipeline: d.headPipeline
+                sha: newSHA, references: d.references, webUrl: d.webUrl,
+                headPipeline: pipeline
             )
             state.data.entries[index] = entry
         }
