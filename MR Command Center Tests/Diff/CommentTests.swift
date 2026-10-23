@@ -237,3 +237,58 @@ struct LiveCommentRequestTests {
         #expect(transport.requests.first?.url?.path() == "/api/v4/projects/1/merge_requests/2/discussions/6a9c1750/notes")
     }
 }
+
+/// Resolved threads used to start folded, and outdated ones sat in a folded group on top,
+/// so a resolved thread needed two clicks to see (issue #19).
+struct ThreadExpansionTests {
+    private func resolvedThreads() -> [GitLabDiscussion] {
+        MockGitLabData.sample.entries.first { $0.detail.iid == 412 }!.discussions.filter(\.isResolved)
+    }
+
+    @Test func resolvedThreadsStartOpenAndFoldOnToggle() throws {
+        let comments = CommentsModel()
+        let threads = resolvedThreads()
+        try #require(threads.count >= 2)
+        #expect(threads.allSatisfy(comments.isExpanded))
+
+        comments.toggleExpanded(threads[0])
+        #expect(!comments.isExpanded(threads[0]))
+        #expect(comments.isExpanded(threads[1]), "Folding one thread leaves the others open")
+
+        comments.toggleExpanded(threads[0])
+        #expect(comments.isExpanded(threads[0]))
+    }
+
+    @Test func outdatedAndOffDiffGroupsStartOpenPerFile() {
+        let comments = CommentsModel()
+        let outdated = ThreadGroupID(fileID: "0:a.py", kind: .outdated)
+        let offDiff = ThreadGroupID(fileID: "0:a.py", kind: .offDiff)
+        let otherFile = ThreadGroupID(fileID: "1:b.py", kind: .outdated)
+        #expect(comments.isGroupExpanded(outdated))
+        #expect(comments.isGroupExpanded(offDiff))
+
+        comments.setGroupExpanded(outdated, false)
+        #expect(!comments.isGroupExpanded(outdated))
+        #expect(comments.isGroupExpanded(offDiff))
+        #expect(comments.isGroupExpanded(otherFile))
+
+        comments.setGroupExpanded(outdated, true)
+        #expect(comments.isGroupExpanded(outdated))
+    }
+
+    /// The mock's resolved thread left on an earlier commit lands in the outdated group,
+    /// which now shows it without any clicks.
+    @Test func resolvedOutdatedThreadIsVisibleWithoutClicks() throws {
+        let entry = MockGitLabData.sample.entries.first { $0.detail.iid == 412 }!
+        let diff = MRDiff(headSHA: entry.detail.sha!, diffs: entry.diffs, changesCount: nil, fetchedAt: .now,
+                          refs: DiffRefs(baseSHA: "0", startSHA: "0", headSHA: entry.detail.sha!))
+        let placement = ThreadPlacement.place(entry.discussions, in: diff)
+        let file = try #require(diff.files.first { $0.newPath == "app/webhooks/delivery.py" })
+        let outdated = try #require(placement.threads(for: file.id).outdated.first)
+        #expect(outdated.isResolved)
+
+        let comments = CommentsModel()
+        #expect(comments.isGroupExpanded(ThreadGroupID(fileID: file.id, kind: .outdated)))
+        #expect(comments.isExpanded(outdated))
+    }
+}
