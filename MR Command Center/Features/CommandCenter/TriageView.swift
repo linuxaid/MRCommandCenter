@@ -126,6 +126,7 @@ private struct BriefingHeader: View {
 private struct LaneTitle: View {
     let lane: Lane
     let count: Int
+    @Environment(AppModel.self) private var appModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -135,6 +136,15 @@ private struct LaneTitle: View {
                 .foregroundStyle(Theme.ink)
             Text(lane.subtitle)
                 .foregroundStyle(Theme.inkSecondary)
+            if lane == .readyToMerge || lane == .autoMerge {
+                let center = appModel.commandCenter
+                Toggle("Merge ready MRs I'm reviewing automatically",
+                       isOn: Binding(get: { center.mergesReadyReviews }, set: { center.setMergesReadyReviews($0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+                    .help("On the next refresh, merges each ready MR you're reviewing at the commit that was checked, with your last squash and delete-branch choices. MRs you opened, and ones your merge rules cover, are left alone.")
+            }
         }
     }
 }
