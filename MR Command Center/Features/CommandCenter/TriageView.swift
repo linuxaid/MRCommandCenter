@@ -74,7 +74,8 @@ struct TriageView: View {
         .onKeyPress(.downArrow) { center.selectNext(); return .handled }
         .onKeyPress(.upArrow) { center.selectPrevious(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "iI")) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .option, .control]), let mr = store.selected else { return .ignored }
+            guard CommandCenter.opensLabelPicker(modifiers: press.modifiers, isComposing: false),
+                  let mr = store.selected else { return .ignored }
             center.editLabels(mr)
             return .handled
         }

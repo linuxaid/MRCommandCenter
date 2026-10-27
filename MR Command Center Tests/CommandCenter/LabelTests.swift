@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import SwiftData
 import Synchronization
 import Testing
@@ -26,6 +27,28 @@ struct LabelTests {
         })
         #expect(Array(editor.visible.prefix(2)).map(\.name).sorted() == ["backend", "payments"], "Applied labels come first")
         #expect(editor.title == "Labels for payments/api!412")
+    }
+
+    @Test func rowsStayPutWhileYouClick() async throws {
+        let (app, _, mr) = try await loaded()
+        let editor = LabelEditor(mrKey: mr.key, service: app.commandCenter)
+        await editor.load()
+        let before = editor.visible.map(\.name)
+
+        await editor.toggle("blocked")
+        await editor.toggle("backend")
+
+        #expect(editor.visible.map(\.name) == before, "Adding or removing doesn't reorder the list under the pointer")
+        #expect(editor.applied.contains("blocked") && !editor.applied.contains("backend"))
+    }
+
+    @Test func iOpensThePickerOnlyWhenNotTypingOrChording() {
+        #expect(CommandCenter.opensLabelPicker(modifiers: [], isComposing: false))
+        #expect(CommandCenter.opensLabelPicker(modifiers: .shift, isComposing: false), "Capital I works too")
+        #expect(!CommandCenter.opensLabelPicker(modifiers: .command, isComposing: false))
+        #expect(!CommandCenter.opensLabelPicker(modifiers: [.option, .command], isComposing: false), "⌥⌘I is the inspector")
+        #expect(!CommandCenter.opensLabelPicker(modifiers: .control, isComposing: false))
+        #expect(!CommandCenter.opensLabelPicker(modifiers: [], isComposing: true), "Typing in a comment box")
     }
 
     @Test func searchIgnoresCase() async throws {

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 import SwiftData
 import os
@@ -449,6 +450,12 @@ final class CommandCenter {
     }
 
     // MARK: Labels
+
+    /// Whether a press of I opens the label picker: not with ⌘, ⌥ or ⌃ held, and not while a
+    /// comment is being written.
+    nonisolated static func opensLabelPicker(modifiers: EventModifiers, isComposing: Bool) -> Bool {
+        modifiers.isDisjoint(with: [.command, .option, .control]) && !isComposing
+    }
 
     /// Opens the label picker for an MR.
     func editLabels(_ mr: TrackedMR) {

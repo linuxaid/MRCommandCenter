@@ -31,6 +31,10 @@ final class LabelEditor {
 
     var applied: Set<String> { Set(mr?.labels ?? []) }
 
+    /// The labels the MR had when the picker opened. The list is ordered by this, not the live
+    /// set, so rows don't jump under the pointer while you click several in a row.
+    private(set) var initiallyApplied: Set<String> = []
+
     /// "Labels for payments/api!412".
     var title: String { mr.map { "Labels for \($0.reference)" } ?? "Labels" }
 
@@ -38,8 +42,8 @@ final class LabelEditor {
     var visible: [GitLabLabel] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         let matching = needle.isEmpty ? available : available.filter { $0.name.lowercased().contains(needle) }
-        let applied = applied
-        return matching.filter { applied.contains($0.name) } + matching.filter { !applied.contains($0.name) }
+        let first = initiallyApplied
+        return matching.filter { first.contains($0.name) } + matching.filter { !first.contains($0.name) }
     }
 
     static let closedMessage = "This merge request is no longer open."
@@ -50,6 +54,7 @@ final class LabelEditor {
             phase = .failed(Self.closedMessage)
             return
         }
+        initiallyApplied = Set(mr.labels)
         if let cached = service.cachedProjectLabels(for: mr) {
             available = cached
             phase = .loaded
@@ -59,6 +64,7 @@ final class LabelEditor {
         do {
             available = try await service.projectLabels(for: mr)
             phase = .loaded
+            error = nil
         } catch {
             if available.isEmpty {
                 phase = .failed(CommandCenter.describeLabelFailure(error, changing: false))
