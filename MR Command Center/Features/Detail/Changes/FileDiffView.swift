@@ -103,9 +103,11 @@ struct FileDiffView: View {
             if isCollapsed {
                 collapsedPlaceholder
             } else {
+                // A new identity per file gives each file a fresh scroll view, so stepping to
+                // another file (↑/↓) starts at its top instead of the previous file's offset.
                 switch effectiveLayout {
-                case .unified: UnifiedDiffView(file: file, scrollRequest: scrollRequest)
-                case .sideBySide: SideBySideDiffView(file: file, scrollRequest: scrollRequest)
+                case .unified: UnifiedDiffView(file: file, scrollRequest: scrollRequest).id(file.id)
+                case .sideBySide: SideBySideDiffView(file: file, scrollRequest: scrollRequest).id(file.id)
                 }
             }
         }
