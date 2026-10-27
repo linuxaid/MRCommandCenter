@@ -107,6 +107,17 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return (1...max(last, 1)).map { lines[$0] ?? "" }.joined(separator: "\n")
     }
 
+    /// Images in the mock diffs come back as a generated PNG (`MockImages`); anything else as its text.
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
+        try check()
+        let diffs = data.entries.filter { $0.detail.projectId == projectID }.flatMap(\.diffs)
+        guard diffs.contains(where: { $0.newPath == path || $0.oldPath == path }) else { throw APIError.notFound }
+        if ImagePreview.isImage(path) {
+            return MockImages.png(width: MockImages.size.width, height: MockImages.size.height)
+        }
+        return Data(try await fileContent(projectID: projectID, path: path, ref: ref).utf8)
+    }
+
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {
         _ = try entry(projectID, iid)
         let note = GitLabDiscussion.Note(

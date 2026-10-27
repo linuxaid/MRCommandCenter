@@ -15,6 +15,8 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var lastDiscussionRequest: NewDiffDiscussionRequest?
         var lastGeneralBody: String?
         var mergeFailure: APIError?
+        var rawFileFailure: APIError?
+        var rawFileOverride: Data?
         /// Fails merges of just these MRs (by iid), on top of `mergeFailure`.
         var mergeFailuresByIID: [Int: APIError] = [:]
         var merges: [MergeOptions] = []
@@ -105,6 +107,14 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
     func fileContent(projectID: Int, path: String, ref: String) async throws -> String {
         record("fileContent")
         return try await mock.fileContent(projectID: projectID, path: path, ref: ref)
+    }
+
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
+        record("rawFile")
+        let (failure, override) = state.withLock { ($0.rawFileFailure, $0.rawFileOverride) }
+        if let failure { throw failure }
+        if let override { return override }
+        return try await mock.rawFile(projectID: projectID, path: path, ref: ref)
     }
 
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {

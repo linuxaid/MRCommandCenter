@@ -68,11 +68,14 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
     }
 
     func fileContent(projectID: Int, path: String, ref: String) async throws -> String {
+        String(decoding: try await rawFile(projectID: projectID, path: path, ref: ref), as: UTF8.self)
+    }
+
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? path
         let request = try http.makeRequest(path: "/api/v4/projects/\(projectID)/repository/files/\(encoded)/raw",
                                            query: [URLQueryItem(name: "ref", value: ref)])
-        let response = try await http.send(request)
-        return String(decoding: response.data, as: UTF8.self)
+        return try await http.send(request).data
     }
 
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {
