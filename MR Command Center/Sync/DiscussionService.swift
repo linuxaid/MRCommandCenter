@@ -8,6 +8,7 @@ enum CommentPostingError: LocalizedError, Equatable {
     case missingDiffRefs
     case needsAPIScope
     case alreadyPosted
+    case resolveNeedsAPIScope
 
     var errorDescription: String? {
         switch self {
@@ -21,6 +22,8 @@ enum CommentPostingError: LocalizedError, Equatable {
             "GitLab refused the comment (403). Posting needs a token with the api scope, not just read_api."
         case .alreadyPosted:
             "This AI comment was already posted to GitLab."
+        case .resolveNeedsAPIScope:
+            "GitLab refused (403). Resolving threads needs a token with the api scope and permission in this project."
         }
     }
 }
@@ -113,6 +116,33 @@ final class DiscussionService {
         }
         Log.sync.info("Posted a reply")
         return note
+    }
+
+    /// Resolves (or reopens) a thread so the MR can merge, and records it in Activity.
+    /// Not gated by "Allow posting comments": like Approve and Merge, it only needs the api scope.
+    func setResolved(_ discussionID: String, resolved: Bool, mr: TrackedMR) async throws {
+        let updated: GitLabDiscussion
+        do {
+            updated = try await client().setDiscussionResolved(projectID: mr.projectID, iid: mr.iid,
+                                                               discussionID: discussionID, resolved: resolved)
+        } catch APIError.forbidden {
+            throw CommentPostingError.resolveNeedsAPIScope
+        }
+        var discussions = cache[mr.key]?.discussions ?? []
+        if let index = discussions.firstIndex(where: { $0.id == discussionID }) {
+            discussions[index] = updated
+        } else {
+            discussions.append(updated)
+        }
+        cache[mr.key] = (cache[mr.key]?.fetchedAt ?? .now, discussions)
+        updateCounts(for: mr, with: discussions)
+        let starter = updated.userNotes.first?.author?.name.split(separator: " ").first.map { "\($0)'s" } ?? "a"
+        let message = "You \(resolved ? "resolved" : "reopened") \(starter) thread"
+        context.insert(ActivityEvent(kind: resolved ? .threadsResolved : .other, message: message, mrKey: mr.key,
+                                     mrReference: mr.reference, mrTitle: mr.title))
+        mr.lastActivityAt = .now
+        try? context.save()
+        Log.sync.info("Changed a thread's resolved state")
     }
 
     private func validated(_ body: String) throws -> String {

@@ -65,6 +65,11 @@ nonisolated struct NewDiffDiscussionRequest: Encodable, Sendable, Equatable {
     }
 }
 
+/// Body for `PUT /projects/:id/merge_requests/:iid/discussions/:discussion_id`.
+nonisolated struct ResolveDiscussionRequest: Encodable, Sendable, Equatable {
+    let resolved: Bool
+}
+
 nonisolated struct NewNoteRequest: Encodable, Sendable, Equatable {
     let body: String
 }

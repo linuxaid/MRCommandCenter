@@ -36,6 +36,24 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return data.entries.filter { $0.detail.author.id == authorID }.map(\.listItem)
     }
 
+    func setDiscussionResolved(projectID: Int, iid: Int, discussionID: String, resolved: Bool) async throws -> GitLabDiscussion {
+        let entry = try entry(projectID, iid)
+        guard entry.discussions.contains(where: { $0.id == discussionID }) else { throw APIError.notFound }
+        let resolver = GitLabUserRef(id: user.id, username: user.username, name: user.name)
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            guard let index = entry.discussions.firstIndex(where: { $0.id == discussionID }) else { return }
+            entry.discussions[index].notes = entry.discussions[index].notes?.map { note in
+                guard note.resolvable == true else { return note }
+                var note = note
+                note.resolved = resolved
+                note.resolvedBy = resolved ? resolver : nil
+                return note
+            }
+            entry.bumpUpdatedAt()
+        }
+        return try self.entry(projectID, iid).discussions.first { $0.id == discussionID }!
+    }
+
     /// Every label the mock data uses, plus a few that no MR has yet.
     func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
         try check()

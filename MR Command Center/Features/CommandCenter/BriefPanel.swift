@@ -35,6 +35,7 @@ struct BriefPanel: View {
                     ChangesGlance(mr: mr)
                 }
                 ReadinessChecklist(mr: mr, readiness: situation.readiness, me: appModel.mergeRequests.username)
+                OpenThreadsCard(mr: mr)
                 AutoMergeCard(mr: mr, situation: situation)
                 ContextCard(mr: mr)
                 RecentActivity(mrKey: mr.key)
@@ -535,6 +536,142 @@ private struct AutoMergeCard: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card()
+        }
+    }
+}
+
+/// Every unresolved comment thread, with Resolve (#28). Click a thread to see it on its line.
+private struct OpenThreadsCard: View {
+    let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @State private var threads: [OpenThread] = []
+    @State private var loadError: String?
+    @State private var resolving: Set<String> = []
+    @State private var errors: [String: String] = [:]
+
+    var body: some View {
+        if mr.unresolvedDiscussions > 0 || !threads.isEmpty || loadError != nil {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("OPEN THREADS").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+                    Spacer()
+                    if !threads.isEmpty {
+                        Text("\(threads.count) to resolve").font(.caption).foregroundStyle(Theme.inkTertiary)
+                    }
+                }
+                VStack(spacing: 0) {
+                    if let loadError, threads.isEmpty {
+                        Label("Couldn't load the threads: \(loadError)", systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(Theme.caution).padding(14)
+                    } else if threads.isEmpty {
+                        ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(14)
+                    }
+                    ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
+                        if index > 0 { Divider().padding(.leading, 14) }
+                        row(thread)
+                    }
+                }
+                .card()
+            }
+            .task(id: "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)") { await load() }
+        }
+    }
+
+    private func row(_ thread: OpenThread) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                open(thread)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(thread.location)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.inkSecondary)
+                        if thread.waitingOnMe {
+                            Text("Waiting on you")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Theme.yourMove, in: .capsule)
+                        }
+                    }
+                    Text(Self.preview(thread))
+                        .font(.callout)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if let last = thread.lastReplyBy {
+                        Text("\(thread.noteCount) comments · last from \(last)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.inkTertiary)
+                    }
+                    if let error = errors[thread.id] {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(thread.path == nil ? "Open the changes" : "Show this thread on its line")
+            Button {
+                Task { await resolve(thread) }
+            } label: {
+                if resolving.contains(thread.id) {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Resolve", systemImage: "checkmark.circle")
+                }
+            }
+            .controlSize(.small)
+            .disabled(resolving.contains(thread.id))
+            .help("Mark this thread resolved on GitLab")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// "Dana: Leftover debug **print**?" with inline Markdown rendered, as GitLab shows it.
+    static func preview(_ thread: OpenThread) -> AttributedString {
+        var name = AttributedString("\(thread.startedBy): ")
+        name.inlinePresentationIntent = .stronglyEmphasized
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        let body = (try? AttributedString(markdown: thread.firstNote, options: options)) ?? AttributedString(thread.firstNote)
+        return name + body
+    }
+
+    private func load() async {
+        do {
+            let discussions = try await appModel.discussions.discussions(for: mr)
+            threads = OpenThread.open(in: discussions, me: appModel.mergeRequests.username, isMyMR: mr.isAuthor)
+            loadError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func resolve(_ thread: OpenThread) async {
+        resolving.insert(thread.id)
+        defer { resolving.remove(thread.id) }
+        errors[thread.id] = nil
+        do {
+            try await appModel.discussions.setResolved(thread.id, resolved: true, mr: mr)
+            withAnimation { threads.removeAll { $0.id == thread.id } }
+        } catch {
+            errors[thread.id] = error.localizedDescription
+        }
+    }
+
+    private func open(_ thread: OpenThread) {
+        appModel.review(mr)
+        if let path = thread.path {
+            appModel.showInDiff(mr: mr, path: path, line: thread.line ?? 1)
+        } else {
+            appModel.detailTab = .changes
         }
     }
 }

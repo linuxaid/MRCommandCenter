@@ -94,6 +94,12 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
                                    body: NewNoteRequest(body: body), decoder: .gitLab)
     }
 
+    func setDiscussionResolved(projectID: Int, iid: Int, discussionID: String, resolved: Bool) async throws -> GitLabDiscussion {
+        let id = discussionID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? discussionID
+        return try await http.put(GitLabDiscussion.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/discussions/\(id)",
+                                  body: ResolveDiscussionRequest(resolved: resolved), decoder: .gitLab)
+    }
+
     func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
         try await allPages(GitLabLabel.self, path: "/api/v4/projects/\(projectID)/labels", query: [
             URLQueryItem(name: "include_ancestor_groups", value: "true"),
