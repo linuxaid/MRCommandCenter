@@ -35,7 +35,7 @@ enum Theme {
     }
 
     static let canvas = Color(hex: Hex.canvas)
-    static let surface = Color.white
+    static let surface = Color(hex: Hex.surface)
     static let sunken = Color(hex: 0xEEE9DF)
     static let hairline = Color(hex: 0xE2DCCF)
     static let ink = Color(hex: 0x1E1C18)
@@ -159,14 +159,16 @@ struct CardSelectionStyle: Equatable {
     /// Where the row's content starts. The same in both states, sized for the widest bar,
     /// so selecting a row never shifts its text.
     let contentLeadingInset: CGFloat
+    /// Room kept on the trailing side for the chevron, in every state.
+    let contentTrailingInset: CGFloat
 
     static let unselected = CardSelectionStyle(borderWidth: 1, tintOpacity: 0, accentBarWidth: 4, showsMarker: false,
-                                               shadowRadius: 2, shadowOpacity: 0.03, contentLeadingInset: 17)
+                                               shadowRadius: 2, shadowOpacity: 0.03, contentLeadingInset: 17, contentTrailingInset: 30)
     static let selected = CardSelectionStyle(borderWidth: 2.5, tintOpacity: 0.08, accentBarWidth: 7, showsMarker: true,
-                                             shadowRadius: 8, shadowOpacity: 0.12, contentLeadingInset: 17)
+                                             shadowRadius: 8, shadowOpacity: 0.12, contentLeadingInset: 17, contentTrailingInset: 30)
     /// "This is on", not "this is selected" (the Merge Rules switches): a light accent border only.
     static let highlighted = CardSelectionStyle(borderWidth: 1.5, tintOpacity: 0, accentBarWidth: 4, showsMarker: false,
-                                                shadowRadius: 4, shadowOpacity: 0.06, contentLeadingInset: 17)
+                                                shadowRadius: 4, shadowOpacity: 0.06, contentLeadingInset: 17, contentTrailingInset: 30)
 
     static func style(isSelected: Bool) -> CardSelectionStyle { isSelected ? .selected : .unselected }
 

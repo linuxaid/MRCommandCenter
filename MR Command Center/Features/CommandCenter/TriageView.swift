@@ -273,7 +273,7 @@ struct TriageRow: View {
         .padding(.vertical, 12)
         .padding(.leading, style.contentLeadingInset)
         // Room for the chevron in every state, so selecting a row doesn't shift its text.
-        .padding(.trailing, 30)
+        .padding(.trailing, style.contentTrailingInset)
         .overlay(alignment: .trailing) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 13, weight: .bold))

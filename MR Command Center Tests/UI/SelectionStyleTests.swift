@@ -16,6 +16,7 @@ struct SelectionStyleTests {
 
     @Test func selectingNeverShiftsTheContent() {
         #expect(CardSelectionStyle.selected.contentLeadingInset == CardSelectionStyle.unselected.contentLeadingInset)
+        #expect(CardSelectionStyle.selected.contentTrailingInset == CardSelectionStyle.unselected.contentTrailingInset)
         #expect(CardSelectionStyle.selected.contentLeadingInset >= CardSelectionStyle.selected.accentBarWidth + 8,
                 "The widest bar fits inside the inset")
     }
@@ -28,7 +29,8 @@ struct SelectionStyleTests {
 
     @Test(arguments: Lane.allCases)
     func selectionColorStandsOutOnTheTintedCard(lane: Lane) {
-        let surface = CardSelectionStyle.tintedSurface(Theme.Hex.lane(lane))
+        // The app tints the selected card with the selection color, not the raw lane color.
+        let surface = CardSelectionStyle.tintedSurface(Theme.Hex.selection(lane))
         let ratio = Contrast.ratio(Theme.Hex.selection(lane), surface)
         #expect(ratio >= 3, "\(lane) selection color is only \(ratio):1 against its tinted card")
     }
