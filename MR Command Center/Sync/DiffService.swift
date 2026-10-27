@@ -37,14 +37,17 @@ final class DiffService {
     private var imageCache: [String: Data] = [:]
     private var imageCacheOrder: [String] = []
     static let imageCacheLimit = 24
+    /// Bigger images aren't previewed (or kept): they'd sit in memory and decode on the main actor.
+    static let imagePreviewByteLimit = 15 * 1024 * 1024
 
     func imageData(for mr: TrackedMR, side: ImagePreview.Side) async throws -> Data {
         let key = "\(mr.projectID):\(side.ref):\(side.path)"
         if let cached = imageCache[key] { return cached }
         let client = try dependencies.gitLabClient(settings: AccountSettings.current(in: context))
         let data = try await client.rawFile(projectID: mr.projectID, path: side.path, ref: side.ref)
+        guard data.count <= Self.imagePreviewByteLimit else { return data }
+        if imageCache[key] == nil { imageCacheOrder.append(key) }
         imageCache[key] = data
-        imageCacheOrder.append(key)
         while imageCacheOrder.count > Self.imageCacheLimit {
             imageCache[imageCacheOrder.removeFirst()] = nil
         }
@@ -55,6 +58,9 @@ final class DiffService {
     func imagePreview(for mr: TrackedMR, side: ImagePreview.Side) async -> ImagePreview.Loaded {
         do {
             let data = try await imageData(for: mr, side: side)
+            guard data.count <= Self.imagePreviewByteLimit else {
+                return .failed("Too large to preview here (\(ImagePreview.sizeDescription(byteCount: data.count, pixelSize: nil))).")
+            }
             guard let image = NSImage(data: data) else {
                 return .failed("This file isn't an image macOS can read (\(ImagePreview.sizeDescription(byteCount: data.count, pixelSize: nil))).")
             }

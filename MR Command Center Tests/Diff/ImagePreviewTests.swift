@@ -63,20 +63,25 @@ struct ImagePreviewTests {
     }
 
     @Test func mockImageIsServedAndCachedPerCommit() async throws {
-        let spy = SpyGitLabClient()
-        let app = AppModel.testing(gitLab: spy)
-        await app.mergeRequests.refresh(.automatic)
-        let carts = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1873 })
-        let diff = try await app.diffs.diff(for: carts)
-        let png = try #require(diff.files.first { $0.path.hasSuffix(".png") })
-        let sides = ImagePreview.sides(for: png, headSHA: diff.headSHA, baseSHA: diff.refs?.baseSHA)
-        let side = try #require(sides.first)
+        let (app, spy, carts, side) = try await cartsImage()
 
         let data = try await app.diffs.imageData(for: carts, side: side)
         _ = try await app.diffs.imageData(for: carts, side: side)
 
         #expect(ImagePreview.pixelSize(of: data)?.width == MockImages.size.width)
         #expect(spy.count("rawFile") == 1, "Same commit and path come from the cache")
+    }
+
+    @Test func hugeImagesAreNotPreviewedOrKept() async throws {
+        let (app, spy, carts, side) = try await cartsImage()
+        spy.edit { $0.rawFileOverride = Data(count: DiffService.imagePreviewByteLimit + 1) }
+
+        guard case .failed(let message) = await app.diffs.imagePreview(for: carts, side: side) else {
+            Issue.record("Expected a too-large message"); return
+        }
+        #expect(message.hasPrefix("Too large to preview"))
+        _ = try await app.diffs.imageData(for: carts, side: side)
+        #expect(spy.count("rawFile") == 2, "Not cached")
     }
 
     private func cartsImage() async throws -> (AppModel, SpyGitLabClient, TrackedMR, ImagePreview.Side) {

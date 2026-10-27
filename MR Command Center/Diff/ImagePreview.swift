@@ -50,7 +50,9 @@ nonisolated enum ImagePreview {
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
-        return (width, height)
+        // EXIF orientations 5–8 are rotated a quarter turn: the image displays with sides swapped.
+        let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+        return (5...8).contains(orientation) ? (height, width) : (width, height)
     }
 
     /// "480 × 300 px · 18 KB", or just the file size when the pixels can't be measured.
