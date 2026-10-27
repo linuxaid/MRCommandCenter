@@ -99,6 +99,19 @@ struct ChangesModelTests {
         #expect(model.selectedFileID == ids[2])
     }
 
+    @Test func movingToAnotherFileDropsAnOldJumpToLine() async throws {
+        let (model, ids) = try await loaded()
+        let path = try #require(model.diff?.files[0].path)
+        model.reveal(path: path, line: 1)
+        #expect(model.scrollRequest?.fileID == ids[0])
+
+        model.moveFileSelection(by: 1)
+        model.moveFileSelection(by: -1)
+
+        #expect(model.selectedFileID == ids[0])
+        #expect(model.scrollRequest == nil, "Coming back to the file starts at its top, not the old line (#22)")
+    }
+
     @Test func upArrowMovesToThePreviousFile() async throws {
         let (model, ids) = try await loaded()
         model.selectedFileID = ids[2]

@@ -51,6 +51,8 @@ final class ChangesModel {
     var selectedFileID: DiffFile.ID?
     /// Large or collapsed files the user chose to show.
     var expandedFileIDs: Set<DiffFile.ID> = []
+    /// One-shot: cleared when the user moves to another file, so coming back to a file starts
+    /// at its top instead of jumping to an old target again (#22).
     var scrollRequest: ScrollRequest?
 
     /// Selects, expands, and scrolls to a file's line. Returns false if the file isn't in the diff.
@@ -67,6 +69,7 @@ final class ChangesModel {
     /// With nothing selected, down picks the first file and up the last.
     func moveFileSelection(by offset: Int) {
         guard let files = diff?.files, !files.isEmpty else { return }
+        scrollRequest = nil
         guard let index = files.firstIndex(where: { $0.id == selectedFileID }) else {
             selectedFileID = offset > 0 ? files.first?.id : files.last?.id
             return

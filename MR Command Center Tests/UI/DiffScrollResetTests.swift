@@ -46,6 +46,36 @@ struct DiffScrollResetTests {
         return found.max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }
     }
 
+    /// Waits up to `timeout` for the diff's scroll view to exist and lay out its content.
+    private func waitForDiffScrollView(in window: NSWindow, timeout: Duration = .seconds(3)) async throws -> NSScrollView {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while clock.now < deadline {
+            if let scroll = diffScrollView(in: window.contentView!), (scroll.documentView?.frame.height ?? 0) > 2000 {
+                return scroll
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return try #require(diffScrollView(in: window.contentView!), "The diff's scroll view never appeared")
+    }
+
+    /// Waits up to `timeout` for the diff's scroll offset to satisfy `condition`; returns the last offset.
+    @discardableResult
+    private func waitForOffset(in window: NSWindow, timeout: Duration = .seconds(3),
+                               _ condition: (CGFloat) -> Bool) async throws -> CGFloat {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        var offset: CGFloat = .nan
+        while clock.now < deadline {
+            if let scroll = diffScrollView(in: window.contentView!) {
+                offset = scroll.contentView.bounds.origin.y
+                if condition(offset) { return offset }
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return offset
+    }
+
     @Test(arguments: [DiffLayout.unified, .sideBySide])
     func nextFileStartsAtTheTop(layout: DiffLayout) async throws {
         let shown = Shown(Self.longFile("First.swift", index: 0))
@@ -55,23 +85,23 @@ struct DiffScrollResetTests {
         window.contentView = NSHostingView(rootView: Host(shown: shown))
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }
-        try await Task.sleep(for: .milliseconds(500))
-
-        let first = try #require(diffScrollView(in: window.contentView!))
+        let first = try await waitForDiffScrollView(in: window)
         first.contentView.scroll(to: NSPoint(x: 0, y: 2000))
         first.reflectScrolledClipView(first.contentView)
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(first.contentView.bounds.origin.y > 1000, "Precondition: the first file is scrolled down")
+        let scrolled = try await waitForOffset(in: window) { $0 > 1000 }
+        try #require(scrolled > 1000, "Precondition: the first file is scrolled down")
 
         shown.file = Self.longFile("Second.swift", index: 1)
-        try await Task.sleep(for: .milliseconds(500))
-
-        let second = try #require(diffScrollView(in: window.contentView!))
-        #expect(second.contentView.bounds.origin.y < 1, "The next file should start at the top, was at \(second.contentView.bounds.origin.y)")
+        // Give a wrong (kept) offset time to show up before checking it isn't there.
+        try await Task.sleep(for: .milliseconds(300))
+        let offset = try await waitForOffset(in: window) { $0 < 1 }
+        #expect(offset < 1, "The next file should start at the top, was at \(offset)")
     }
 
-    @Test func jumpingToALineInAnotherFileStillScrollsThere() async throws {
+    @Test(arguments: [DiffLayout.unified, .sideBySide])
+    func jumpingToALineInAnotherFileStillScrollsThere(layout: DiffLayout) async throws {
         let shown = Shown(Self.longFile("First.swift", index: 0))
+        shown.layout = layout
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 500),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: Host(shown: shown))
@@ -82,9 +112,7 @@ struct DiffScrollResetTests {
         let second = Self.longFile("Second.swift", index: 1)
         shown.scrollRequest = ScrollRequest(fileID: second.id, line: 250)
         shown.file = second
-        try await Task.sleep(for: .milliseconds(1000))
-
-        let scroll = try #require(diffScrollView(in: window.contentView!))
-        #expect(scroll.contentView.bounds.origin.y > 1000, "Should scroll down to line 250, was at \(scroll.contentView.bounds.origin.y)")
+        let offset = try await waitForOffset(in: window) { $0 > 1000 }
+        #expect(offset > 1000, "Should scroll down to line 250, was at \(offset)")
     }
 }
