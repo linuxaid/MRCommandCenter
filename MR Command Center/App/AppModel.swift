@@ -35,6 +35,8 @@ final class AppModel {
         mergeRequests = MergeRequestStore(container: modelContainer, dependencies: dependencies)
         diffs = DiffService(container: modelContainer, dependencies: dependencies)
         discussions = DiscussionService(container: modelContainer, dependencies: dependencies)
+        let store = mergeRequests
+        discussions.recordActivity = { change, mr in store.record(change, for: mr) }
         staticChecks = StaticCheckService(container: modelContainer, diffs: diffs)
         jira = JiraService(container: modelContainer, dependencies: dependencies)
         aiReview = AIReviewService(container: modelContainer, dependencies: dependencies, diffs: diffs, staticChecks: staticChecks, jira: jira)

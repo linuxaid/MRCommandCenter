@@ -52,7 +52,7 @@ struct OpenThreadsTests {
         let cached = try #require(app.discussions.cachedDiscussions(for: mr.key))
         #expect(cached.first { $0.id == metric.id }?.isResolved == true)
         let events = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
-        #expect(events.contains { $0.message == "You resolved A.J.'s thread" })
+        #expect(events.contains { $0.message == "You resolved your thread" })
     }
 
     @Test func reopeningPutsItBack() async throws {
@@ -93,5 +93,110 @@ struct OpenThreadsTests {
         await comments.setResolved(print, true)
         #expect(comments.resolveErrors[print.id] == nil)
         #expect(mr.unresolvedDiscussions == 2)
+    }
+
+    private func addThread(to iid: Int, id: String, spy: SpyGitLabClient, newLine: Int? = 5, oldLine: Int? = nil) {
+        let dana = GitLabUserRef(id: 31, username: "dana", name: "Dana Okafor")
+        let position = GitLabNotePosition(newPath: "src/a.ts", oldLine: oldLine, newLine: newLine)
+        let note = GitLabDiscussion.Note(id: Int.random(in: 1...999_999), resolvable: true, resolved: false, system: false,
+                                         body: "New question", author: dana, createdAt: .now, type: "DiffNote", position: position)
+        spy.edit { state in
+            let index = state.data.entries.firstIndex { $0.detail.iid == iid }!
+            state.data.entries[index].discussions.append(GitLabDiscussion(id: id, individualNote: false, notes: [note]))
+            state.data.entries[index].bumpUpdatedAt()
+        }
+    }
+
+    @Test func resolvingCountsThreadsThatArrivedAfterTheCacheFilled() async throws {
+        let (app, spy, mr, _) = try await loaded()
+        addThread(to: 412, id: "412-new", spy: spy)
+        await app.mergeRequests.refresh(.automatic)
+        #expect(mr.unresolvedDiscussions == 4)
+
+        try await app.discussions.setResolved("412-print", resolved: true, mr: mr)
+
+        #expect(mr.unresolvedDiscussions == 3, "The new thread still counts")
+    }
+
+    @Test func resolvingTheLastThreadLogsWhatItUnblocked() async throws {
+        let spy = SpyGitLabClient()
+        let app = AppModel.testing(gitLab: spy)
+        addThread(to: 233, id: "233-last", spy: spy)
+        await app.refresh(.automatic)
+        let mine = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 233 })
+        #expect(mine.unresolvedDiscussions == 1)
+
+        try await app.discussions.setResolved("233-last", resolved: true, mr: mine)
+
+        let kinds = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
+            .filter { $0.mrKey == mine.key }.map(\.kind)
+        #expect(kinds.contains(.threadsResolved))
+    }
+
+    @Test func threadOnARemovedLineOpensAtItsFile() {
+        let note = GitLabDiscussion.Note(id: 1, resolvable: true, resolved: false, system: false, body: "Why remove this?",
+                                         author: GitLabUserRef(id: 2, username: "dana", name: "Dana Okafor"),
+                                         position: GitLabNotePosition(oldPath: "a/old.swift", newPath: "a/old.swift", oldLine: 33))
+        let thread = try! #require(OpenThread.open(in: [GitLabDiscussion(id: "r", individualNote: false, notes: [note])],
+                                                   me: "aj", isMyMR: false).first)
+        #expect(thread.line == nil, "The diff jumps by new-side line; a removed line has none")
+        #expect(thread.oldLine == 33)
+        #expect(thread.location == "old.swift:33 (removed)")
+    }
+
+    @Test func newestActivityFirstAfterTheOnesWaitingOnYou() {
+        func thread(_ id: String, hoursAgo: Double) -> GitLabDiscussion {
+            GitLabDiscussion(id: id, individualNote: false, notes: [GitLabDiscussion.Note(
+                id: 1, resolvable: true, resolved: false, system: false, body: id,
+                author: GitLabUserRef(id: 2, username: "dana", name: "Dana"), createdAt: .now.addingTimeInterval(-hoursAgo * 3600))])
+        }
+        let order = OpenThread.open(in: [thread("old", hoursAgo: 5), thread("new", hoursAgo: 1)], me: "aj", isMyMR: false).map(\.id)
+        #expect(order == ["new", "old"])
+    }
+
+    @Test func liveClientResolvesWithPUTAndJSON() async throws {
+        let transport = StubTransport([.response(status: 200, body: Data(#"{"id":"d1","notes":[]}"#.utf8)),
+                                       .response(status: 200, body: Data(#"{"id":"d1","notes":[]}"#.utf8))])
+        let client = LiveGitLabClient(baseURL: URL(string: "https://gitlab.example.com")!, token: "t", transport: transport)
+        _ = try await client.setDiscussionResolved(projectID: 101, iid: 412, discussionID: "d1", resolved: true)
+        _ = try await client.setDiscussionResolved(projectID: 101, iid: 412, discussionID: "d1", resolved: false)
+
+        let sent = transport.requests
+        #expect(sent.count == 2)
+        #expect(sent[0].httpMethod == "PUT")
+        #expect(sent[0].url?.path() == "/api/v4/projects/101/merge_requests/412/discussions/d1")
+        let first = try #require(sent[0].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        let second = try #require(sent[1].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(first["resolved"] as? Bool == true)
+        #expect(second["resolved"] as? Bool == false)
+    }
+
+    @Test func briefModelRemovesResolvedRowsAndKeepsFailedOnes() async throws {
+        let (app, spy, mr, _) = try await loaded()
+        let model = OpenThreadsModel()
+        #expect(!model.hasLoaded)
+        await model.load(mr, service: app.discussions, me: app.mergeRequests.username, force: false)
+        #expect(model.hasLoaded && model.threads.count == 3)
+
+        let target = try #require(model.threads.first)
+        spy.edit { $0.resolveFailure = .offline }
+        await model.resolve(target, on: mr, service: app.discussions)
+        #expect(model.threads.contains { $0.id == target.id })
+        #expect(model.errors[target.id] != nil)
+
+        spy.edit { $0.resolveFailure = nil }
+        await model.resolve(target, on: mr, service: app.discussions)
+        #expect(!model.threads.contains { $0.id == target.id })
+        #expect(model.errors[target.id] == nil)
+    }
+
+    @Test func briefModelFinishesLoadingWhenNothingIsOpen() async throws {
+        let app = AppModel.testing()
+        await app.refresh(.automatic)
+        let mine = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 233 })
+        let model = OpenThreadsModel()
+        await model.load(mine, service: app.discussions, me: app.mergeRequests.username, force: true)
+        #expect(model.hasLoaded)
+        #expect(model.threads.isEmpty, "The card hides instead of spinning forever")
     }
 }

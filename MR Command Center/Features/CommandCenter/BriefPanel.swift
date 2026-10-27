@@ -544,36 +544,43 @@ private struct AutoMergeCard: View {
 private struct OpenThreadsCard: View {
     let mr: TrackedMR
     @Environment(AppModel.self) private var appModel
-    @State private var threads: [OpenThread] = []
-    @State private var loadError: String?
-    @State private var resolving: Set<String> = []
-    @State private var errors: [String: String] = [:]
+    @State private var model = OpenThreadsModel()
+    @State private var lastLoadKey: String?
 
     var body: some View {
-        if mr.unresolvedDiscussions > 0 || !threads.isEmpty || loadError != nil {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("OPEN THREADS").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
-                    Spacer()
-                    if !threads.isEmpty {
-                        Text("\(threads.count) to resolve").font(.caption).foregroundStyle(Theme.inkTertiary)
+        let showsCard = model.hasLoaded ? (!model.threads.isEmpty || model.loadError != nil) : mr.unresolvedDiscussions > 0
+        Group {
+            if showsCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("OPEN THREADS").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+                        Spacer()
+                        if !model.threads.isEmpty {
+                            Text("\(model.threads.count) to resolve").font(.caption).foregroundStyle(Theme.inkTertiary)
+                        }
                     }
+                    VStack(spacing: 0) {
+                        if !model.hasLoaded {
+                            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(14)
+                        } else if let error = model.loadError, model.threads.isEmpty {
+                            Label("Couldn't load the threads: \(error)", systemImage: "exclamationmark.triangle")
+                                .font(.callout).foregroundStyle(Theme.caution).padding(14)
+                        }
+                        ForEach(Array(model.threads.enumerated()), id: \.element.id) { index, thread in
+                            if index > 0 { Divider().padding(.leading, 14) }
+                            row(thread)
+                        }
+                    }
+                    .card()
                 }
-                VStack(spacing: 0) {
-                    if let loadError, threads.isEmpty {
-                        Label("Couldn't load the threads: \(loadError)", systemImage: "exclamationmark.triangle")
-                            .font(.callout).foregroundStyle(Theme.caution).padding(14)
-                    } else if threads.isEmpty {
-                        ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(14)
-                    }
-                    ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
-                        if index > 0 { Divider().padding(.leading, 14) }
-                        row(thread)
-                    }
-                }
-                .card()
             }
-            .task(id: "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)") { await load() }
+        }
+        // Reload when the MR changes on GitLab, skipping the short cache so new threads show.
+        .task(id: "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)") {
+            let key = mr.key
+            await model.load(mr, service: appModel.discussions, me: appModel.mergeRequests.username,
+                             force: lastLoadKey == key)
+            lastLoadKey = key
         }
     }
 
@@ -605,7 +612,7 @@ private struct OpenThreadsCard: View {
                             .font(.caption)
                             .foregroundStyle(Theme.inkTertiary)
                     }
-                    if let error = errors[thread.id] {
+                    if let error = model.errors[thread.id] {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .font(.caption).foregroundStyle(Theme.danger)
                             .fixedSize(horizontal: false, vertical: true)
@@ -615,18 +622,18 @@ private struct OpenThreadsCard: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(thread.path == nil ? "Open the changes" : "Show this thread on its line")
+            .help(thread.path == nil ? "Open the changes" : "Show this thread in the diff")
             Button {
-                Task { await resolve(thread) }
+                Task { await model.resolve(thread, on: mr, service: appModel.discussions) }
             } label: {
-                if resolving.contains(thread.id) {
+                if model.resolving.contains(thread.id) {
                     ProgressView().controlSize(.small)
                 } else {
                     Label("Resolve", systemImage: "checkmark.circle")
                 }
             }
             .controlSize(.small)
-            .disabled(resolving.contains(thread.id))
+            .disabled(model.resolving.contains(thread.id))
             .help("Mark this thread resolved on GitLab")
         }
         .padding(.horizontal, 14)
@@ -642,34 +649,11 @@ private struct OpenThreadsCard: View {
         return name + body
     }
 
-    private func load() async {
-        do {
-            let discussions = try await appModel.discussions.discussions(for: mr)
-            threads = OpenThread.open(in: discussions, me: appModel.mergeRequests.username, isMyMR: mr.isAuthor)
-            loadError = nil
-        } catch is CancellationError {
-            return
-        } catch {
-            loadError = error.localizedDescription
-        }
-    }
-
-    private func resolve(_ thread: OpenThread) async {
-        resolving.insert(thread.id)
-        defer { resolving.remove(thread.id) }
-        errors[thread.id] = nil
-        do {
-            try await appModel.discussions.setResolved(thread.id, resolved: true, mr: mr)
-            withAnimation { threads.removeAll { $0.id == thread.id } }
-        } catch {
-            errors[thread.id] = error.localizedDescription
-        }
-    }
-
+    /// Opens review mode at the thread's line; threads on removed lines open at their file.
     private func open(_ thread: OpenThread) {
         appModel.review(mr)
         if let path = thread.path {
-            appModel.showInDiff(mr: mr, path: path, line: thread.line ?? 1)
+            appModel.showInDiff(mr: mr, path: path, line: thread.line ?? 0)
         } else {
             appModel.detailTab = .changes
         }

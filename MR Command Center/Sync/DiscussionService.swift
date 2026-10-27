@@ -118,9 +118,13 @@ final class DiscussionService {
         return note
     }
 
+    /// Where activity lines go (`MergeRequestStore.record`), set by `AppModel`.
+    var recordActivity: ((ActivityDetector.Change, TrackedMR) -> Void)?
+
     /// Resolves (or reopens) a thread so the MR can merge, and records it in Activity.
     /// Not gated by "Allow posting comments": like Approve and Merge, it only needs the api scope.
     func setResolved(_ discussionID: String, resolved: Bool, mr: TrackedMR) async throws {
+        let before = MRSnapshot(mr)
         let updated: GitLabDiscussion
         do {
             updated = try await client().setDiscussionResolved(projectID: mr.projectID, iid: mr.iid,
@@ -128,19 +132,26 @@ final class DiscussionService {
         } catch APIError.forbidden {
             throw CommentPostingError.resolveNeedsAPIScope
         }
-        var discussions = cache[mr.key]?.discussions ?? []
-        if let index = discussions.firstIndex(where: { $0.id == discussionID }) {
-            discussions[index] = updated
-        } else {
-            discussions.append(updated)
+        // Recount from a fresh fetch: the cache may predate threads that arrived since.
+        if (try? await discussions(for: mr, forceRefresh: true)) == nil {
+            // Couldn't refetch: patch the cache, and move the count by just this thread.
+            if var cached = cache[mr.key]?.discussions, let index = cached.firstIndex(where: { $0.id == discussionID }) {
+                let wasUnresolved = cached[index].isUnresolved
+                cached[index] = updated
+                cache[mr.key] = (cache[mr.key]?.fetchedAt ?? .now, cached)
+                if wasUnresolved != updated.isUnresolved {
+                    mr.unresolvedDiscussions = max(0, mr.unresolvedDiscussions + (updated.isUnresolved ? 1 : -1))
+                }
+            }
         }
-        cache[mr.key] = (cache[mr.key]?.fetchedAt ?? .now, discussions)
-        updateCounts(for: mr, with: discussions)
-        let starter = updated.userNotes.first?.author?.name.split(separator: " ").first.map { "\($0)'s" } ?? "a"
-        let message = "You \(resolved ? "resolved" : "reopened") \(starter) thread"
-        context.insert(ActivityEvent(kind: resolved ? .threadsResolved : .other, message: message, mrKey: mr.key,
-                                     mrReference: mr.reference, mrTitle: mr.title))
-        mr.lastActivityAt = .now
+        let me = AccountSettings.current(in: context).gitLabUsername
+        let starter = updated.userNotes.first?.author
+        let whose = starter?.username == me ? "your" : starter.map { "\($0.name.split(separator: " ").first ?? "")'s" } ?? "a"
+        recordActivity?(ActivityDetector.Change(kind: .other, message: "You \(resolved ? "resolved" : "reopened") \(whose) thread"), mr)
+        // What resolving changed: all threads resolved, ready to merge...
+        for change in ActivityDetector.changes(from: before, to: MRSnapshot(mr)) {
+            recordActivity?(change, mr)
+        }
         try? context.save()
         Log.sync.info("Changed a thread's resolved state")
     }

@@ -51,7 +51,10 @@ nonisolated struct MockGitLabClient: GitLabAPI {
             }
             entry.bumpUpdatedAt()
         }
-        return try self.entry(projectID, iid).discussions.first { $0.id == discussionID }!
+        guard let updated = try self.entry(projectID, iid).discussions.first(where: { $0.id == discussionID }) else {
+            throw APIError.notFound
+        }
+        return updated
     }
 
     /// Every label the mock data uses, plus a few that no MR has yet.
