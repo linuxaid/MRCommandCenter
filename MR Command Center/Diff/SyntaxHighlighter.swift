@@ -33,6 +33,8 @@ nonisolated struct CodeLanguage: Sendable, Equatable {
     var commentNeedsSpaceBefore = false
     /// Characters that may end an identifier (Ruby's `defined?`, `save!`).
     var identifierSuffixes: Set<Character> = []
+    /// `#1C00CF` is one color value (CSS), not a directive or a stray number.
+    var hashHexColors = false
 
     nonisolated struct Pair: Sendable, Equatable {
         let open: String
@@ -59,7 +61,8 @@ nonisolated struct CodeLanguage: Sendable, Equatable {
         case "json", "jsonc": return .json
         case "tf", "tfvars", "hcl": return .hcl
         case "sql": return .sql
-        case "css", "scss", "sass", "less": return .css
+        case "css": return .css
+        case "scss", "sass", "less": return .scss
         case "html", "htm", "xml", "plist", "svg", "xib", "storyboard", "vue": return .markup
         case "php": return .php
         default: return nil
@@ -109,7 +112,7 @@ nonisolated extension CodeLanguage {
         name: "Java",
         keywords: ["abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue",
                    "data", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float", "for", "fun",
-                   "if", "implements", "import", "in", "instanceof", "int", "interface", "internal", "is", "it", "long",
+                   "if", "implements", "import", "in", "instanceof", "int", "interface", "internal", "is", "long",
                    "native", "new", "null", "object", "open", "override", "package", "private", "protected", "public",
                    "return", "sealed", "short", "static", "super", "suspend", "switch", "synchronized", "this", "throw",
                    "throws", "true", "false", "try", "val", "var", "void", "volatile", "when", "while",
@@ -170,7 +173,7 @@ nonisolated extension CodeLanguage {
     )
 
     static let yaml = CodeLanguage(
-        name: "YAML", keywords: ["true", "false", "null", "yes", "no", "on", "off"],
+        name: "YAML", keywords: ["true", "false", "null"],
         lineComments: ["#"], quotes: ["\"", "'"], capitalizedTypes: false, commentNeedsSpaceBefore: true
     )
 
@@ -194,9 +197,16 @@ nonisolated extension CodeLanguage {
         caseInsensitiveKeywords: true, lineComments: ["--"], blockComment: cFamilyBlock, quotes: ["'", "\""], capitalizedTypes: false
     )
 
+    /// Plain CSS has only block comments: `//` would eat `url(http://…)`.
     static let css = CodeLanguage(
         name: "CSS", keywords: ["important", "inherit", "initial", "none", "auto"],
-        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'"], attributePrefix: "@", capitalizedTypes: false
+        blockComment: cFamilyBlock, quotes: ["\"", "'"], attributePrefix: "@", capitalizedTypes: false, hashHexColors: true
+    )
+
+    static let scss = CodeLanguage(
+        name: "SCSS", keywords: ["important", "inherit", "initial", "none", "auto"],
+        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'"], attributePrefix: "@", capitalizedTypes: false,
+        hashHexColors: true
     )
 
     static let markup = CodeLanguage(
@@ -373,6 +383,14 @@ nonisolated enum SyntaxHighlighter {
                         state.openMultilineQuote = quote.name
                         break lexing
                     }
+                    continue
+                }
+
+                if language.hashHexColors, c == "#", i + 1 < chars.count, chars[i + 1].isHexDigit {
+                    var j = i + 1
+                    while j < chars.count, chars[j].isHexDigit { j += 1 }
+                    tokens.append(SyntaxToken(range: i..<j, kind: .number))
+                    i = j
                     continue
                 }
 

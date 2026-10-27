@@ -6,10 +6,13 @@ struct UnifiedDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
     @State private var highlighted: DiffLine.ID?
-    /// Syntax colors per line, worked out once per file (#26).
+    /// Syntax colors per line (#26), and the hunks they were worked out for: colors are only
+    /// used while they still match what's shown, so a refresh never paints old colors on new text.
     @State private var syntax = SyntaxHighlighter.Highlighted()
+    @State private var syntaxHunks: [DiffHunk] = []
 
     var body: some View {
+        let colors = syntaxHunks == file.hunks ? syntax : SyntaxHighlighter.Highlighted()
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -18,7 +21,7 @@ struct UnifiedDiffView: View {
                         HunkHeaderRow(hunk: hunk)
                         ForEach(hunk.lines) { line in
                             VStack(alignment: .leading, spacing: 0) {
-                                UnifiedLineRow(fileID: file.id, line: line, tokens: syntax.unified(line), isHighlighted: highlighted == line.id)
+                                UnifiedLineRow(fileID: file.id, line: line, tokens: colors.unified(line), isHighlighted: highlighted == line.id)
                                 LineThreads(fileID: file.id, line: line)
                             }
                             .id(line.id)
@@ -30,7 +33,12 @@ struct UnifiedDiffView: View {
             .onAppear { scroll(proxy, animated: false) }
             .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
             // Keyed by content: a refresh can bring new hunks under the same file ID.
-            .task(id: file.hunks) { syntax = await SyntaxHighlighter.highlightOffMain(file) }
+            .task(id: file.hunks) {
+                let result = await SyntaxHighlighter.highlightOffMain(file)
+                guard !Task.isCancelled else { return }
+                syntax = result
+                syntaxHunks = file.hunks
+            }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
@@ -57,11 +65,14 @@ struct UnifiedDiffView: View {
 struct SideBySideDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
-    /// Syntax colors per line, worked out once per file (#26).
+    /// Syntax colors per line (#26), and the hunks they were worked out for: colors are only
+    /// used while they still match what's shown, so a refresh never paints old colors on new text.
     @State private var syntax = SyntaxHighlighter.Highlighted()
+    @State private var syntaxHunks: [DiffHunk] = []
     @State private var highlighted: SplitRow.ID?
 
     var body: some View {
+        let colors = syntaxHunks == file.hunks ? syntax : SyntaxHighlighter.Highlighted()
         ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -71,9 +82,9 @@ struct SideBySideDiffView: View {
                     ForEach(SideBySide.rows(for: hunk)) { row in
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(alignment: .top, spacing: 0) {
-                                SplitCell(fileID: file.id, line: row.left, side: .old, tokens: row.left.flatMap { syntax.old[$0.id] })
+                                SplitCell(fileID: file.id, line: row.left, side: .old, tokens: row.left.flatMap { colors.old[$0.id] })
                                 Divider()
-                                SplitCell(fileID: file.id, line: row.right, side: .new, tokens: row.right.flatMap { syntax.new[$0.id] })
+                                SplitCell(fileID: file.id, line: row.right, side: .new, tokens: row.right.flatMap { colors.new[$0.id] })
                             }
                             if let left = row.left {
                                 LineThreads(fileID: file.id, line: left)
@@ -92,7 +103,12 @@ struct SideBySideDiffView: View {
         .onAppear { scroll(proxy, animated: false) }
         .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
             // Keyed by content: a refresh can bring new hunks under the same file ID.
-            .task(id: file.hunks) { syntax = await SyntaxHighlighter.highlightOffMain(file) }
+            .task(id: file.hunks) {
+                let result = await SyntaxHighlighter.highlightOffMain(file)
+                guard !Task.isCancelled else { return }
+                syntax = result
+                syntaxHunks = file.hunks
+            }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)

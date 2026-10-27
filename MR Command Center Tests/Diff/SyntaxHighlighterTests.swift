@@ -24,7 +24,7 @@ struct SyntaxHighlighterTests {
                       ("Main.kt", "Java"), ("main.go", "Go"), ("lib.rs", "Rust"), ("query.sql", "SQL"),
                       ("deploy.sh", "Shell"), ("main.tf", "HCL"), ("config.yml", "YAML"), ("Dockerfile", "Shell"),
                       ("delivery.m", "C"), ("Bridge.h", "C"), ("Gemfile.rake", "Ruby"), ("app.rb", "Ruby"),
-                      ("package.json", "JSON"), ("site.css", "CSS"), ("index.html", "Markup"), ("Info.plist", "Markup"),
+                      ("package.json", "JSON"), ("site.css", "CSS"), ("theme.scss", "SCSS"), ("index.html", "Markup"), ("Info.plist", "Markup"),
                       ("Build.java", "Java")])
     func detectsLanguages(path: String, name: String) {
         #expect(CodeLanguage.forPath(path)?.name == name)
@@ -165,7 +165,7 @@ struct SyntaxHighlighterTests {
     }
 
     @Test func kotlinLine() {
-        let tokens = kinds(lex("    @JvmStatic fun load(id: Long): User? = repo.find(id) // cached", .java))
+        let tokens = kinds(lex("    @JvmStatic fun load(id: Long): User? = repo.find(id).map { it.id } // cached", .java))
         #expect(tokens["@JvmStatic"] == .attribute)
         #expect(tokens["fun"] == .keyword)
         #expect(tokens["User"] == .type)
@@ -180,5 +180,32 @@ struct SyntaxHighlighterTests {
     @Test func rustAttribute() {
         let attribute = lex("#[derive(Debug, Clone)]", .rust).first
         #expect(attribute?.0 == "#[derive(Debug, Clone)]" && attribute?.1 == .directive)
+    }
+
+    @Test func eachHunkStartsFresh() {
+        let hunks = UnifiedDiffParser.parse("""
+        @@ -1,1 +1,1 @@
+        -x
+        +/* opened and never closed in this hunk
+        @@ -40,1 +40,1 @@
+        -y
+        +let later = 2
+        """)
+        let later = hunks[1].lines.first { $0.kind == .addition }!
+        let tokens = SyntaxHighlighter.highlight(hunks, language: .swift)
+        #expect(tokens.new[later.id]?.first?.kind == .keyword, "Lines between hunks aren't shown, so no state carries over")
+    }
+
+    @Test func unknownFileGetsNoColors() {
+        let file = DiffFile(GitLabDiff(oldPath: "notes.txt", newPath: "notes.txt", diff: "@@ -0,0 +1,1 @@\n+let x = 1",
+                                       newFile: true, renamedFile: false, deletedFile: false), index: 0)
+        #expect(SyntaxHighlighter.highlight(for: file) == SyntaxHighlighter.Highlighted())
+    }
+
+    @Test func plainCSSKeepsURLsAndColorsHex() {
+        let tokens = lex("background: url(http://example.com/a.png) #1C00CF;", .css)
+        #expect(!tokens.contains { $0.1 == .comment }, "Plain CSS has no // comments")
+        #expect(tokens.contains { $0 == ("#1C00CF", .number) })
+        #expect(lex("// note", .scss).first?.1 == .comment)
     }
 }
