@@ -173,6 +173,24 @@ final class CommentsModel {
         }
     }
 
+    /// Threads with a resolve request in flight, and the last failure per thread.
+    private(set) var resolvingIDs: Set<String> = []
+    private(set) var resolveErrors: [String: String] = [:]
+
+    /// Resolves or reopens a thread on GitLab, then redraws the threads from the updated cache.
+    func setResolved(_ discussion: GitLabDiscussion, _ resolved: Bool) async {
+        guard let mr, let service, !resolvingIDs.contains(discussion.id) else { return }
+        resolvingIDs.insert(discussion.id)
+        defer { resolvingIDs.remove(discussion.id) }
+        resolveErrors[discussion.id] = nil
+        do {
+            try await service.setResolved(discussion.id, resolved: resolved, mr: mr)
+            if let cached = service.cachedDiscussions(for: mr.key) { apply(cached) }
+        } catch {
+            resolveErrors[discussion.id] = error.localizedDescription
+        }
+    }
+
     func threads(fileID: DiffFile.ID, lineID: DiffLine.ID) -> [GitLabDiscussion] {
         placement.files[fileID]?.byLine[lineID] ?? []
     }

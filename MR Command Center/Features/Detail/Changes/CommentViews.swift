@@ -116,7 +116,17 @@ struct ThreadView: View {
                 ForEach(discussion.userNotes) { note in
                     NoteView(note: note)
                 }
-                replyArea
+                HStack(spacing: 12) {
+                    replyArea
+                    if discussion.isResolvable && comments.activeTarget != .reply(discussionID: discussion.id) {
+                        resolveButton
+                    }
+                }
+                if let error = comments.resolveErrors[discussion.id] {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(Theme.danger)
+                }
             }
         }
         .padding(10)
@@ -154,6 +164,19 @@ struct ThreadView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(isExpanded ? "Collapse thread" : "Expand thread")
+    }
+
+    private var resolveButton: some View {
+        let resolve = !discussion.isResolved
+        return Button {
+            Task { await comments.setResolved(discussion, resolve) }
+        } label: {
+            Label(resolve ? "Resolve" : "Reopen", systemImage: resolve ? "checkmark.circle" : "arrow.uturn.backward.circle")
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .disabled(comments.resolvingIDs.contains(discussion.id))
+        .help(resolve ? "Mark this thread resolved on GitLab" : "Reopen this thread on GitLab")
     }
 
     @ViewBuilder

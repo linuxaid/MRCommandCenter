@@ -247,6 +247,15 @@ nonisolated struct LabelStyle: Codable, Sendable, Equatable {
 
 /// Whose turn it is in each unresolved thread, from your point of view.
 nonisolated struct ThreadTurns: Equatable {
+    /// An unresolved thread waits on you when someone else spoke last and it involves you
+    /// (you commented in it, or it's your MR). Shared by the counts and the brief's list.
+    static func isWaitingOnMe(_ thread: GitLabDiscussion, me: String?, isMyMR: Bool) -> Bool {
+        guard let me, thread.isUnresolved else { return false }
+        let notes = thread.userNotes
+        guard let lastAuthor = notes.last?.author, lastAuthor.username != me else { return false }
+        return isMyMR || notes.contains { $0.author?.username == me }
+    }
+
     var awaitingMe = 0
     var awaitingOthers = 0
     var lastReplyFrom: String?
@@ -256,14 +265,12 @@ nonisolated struct ThreadTurns: Equatable {
         guard let me else { return }
         var latestReply: Date?
         for thread in discussions where thread.isUnresolved {
-            let notes = thread.userNotes
-            guard let last = notes.last, let lastAuthor = last.author else { continue }
+            guard let last = thread.userNotes.last, let lastAuthor = last.author else { continue }
             if lastAuthor.username == me {
                 awaitingOthers += 1
                 continue
             }
-            let involved = isMyMR || notes.contains { $0.author?.username == me }
-            guard involved else { continue }
+            guard Self.isWaitingOnMe(thread, me: me, isMyMR: isMyMR) else { continue }
             awaitingMe += 1
             let date = last.createdAt ?? .distantPast
             if latestReply.map({ date >= $0 }) ?? true {

@@ -35,6 +35,7 @@ struct BriefPanel: View {
                     ChangesGlance(mr: mr)
                 }
                 ReadinessChecklist(mr: mr, readiness: situation.readiness, me: appModel.mergeRequests.username)
+                OpenThreadsCard(mr: mr)
                 AutoMergeCard(mr: mr, situation: situation)
                 ContextCard(mr: mr)
                 RecentActivity(mrKey: mr.key)
@@ -535,6 +536,141 @@ private struct AutoMergeCard: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card()
+        }
+    }
+}
+
+private struct ThreadsLoadKey: Equatable {
+    let key: String
+    let updatedAt: Date
+    let unresolved: Int
+    let awaitingMe: Int
+
+    init(mr: TrackedMR) {
+        key = mr.key
+        updatedAt = mr.lastSeenUpdatedAt
+        unresolved = mr.unresolvedDiscussions
+        awaitingMe = mr.threadsAwaitingMe
+    }
+}
+
+/// Every unresolved comment thread, with Resolve (#28). Click a thread to see it on its line.
+private struct OpenThreadsCard: View {
+    let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @State private var model = OpenThreadsModel()
+    @State private var lastLoadKey: String?
+
+    var body: some View {
+        let showsCard = model.hasLoaded ? (!model.threads.isEmpty || model.loadError != nil) : mr.unresolvedDiscussions > 0
+        Group {
+            if showsCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("OPEN THREADS").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+                        Spacer()
+                        if !model.threads.isEmpty {
+                            Text("\(model.threads.count) to resolve").font(.caption).foregroundStyle(Theme.inkTertiary)
+                        }
+                    }
+                    VStack(spacing: 0) {
+                        if !model.hasLoaded {
+                            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(14)
+                        } else if let error = model.loadError, model.threads.isEmpty {
+                            Label("Couldn't load the threads: \(error)", systemImage: "exclamationmark.triangle")
+                                .font(.callout).foregroundStyle(Theme.caution).padding(14)
+                        }
+                        ForEach(Array(model.threads.enumerated()), id: \.element.id) { index, thread in
+                            if index > 0 { Divider().padding(.leading, 14) }
+                            row(thread)
+                        }
+                    }
+                    .card()
+                }
+            }
+        }
+        // Reload when the MR changes on GitLab (skipping the short cache so new threads show), and
+        // when its thread counts change, e.g. a thread resolved in the diff beside this rail.
+        .task(id: ThreadsLoadKey(mr: mr)) {
+            let key = "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)"
+            await model.load(mr, service: appModel.discussions, me: appModel.mergeRequests.username,
+                             force: lastLoadKey != nil && lastLoadKey != key && lastLoadKey?.hasPrefix(mr.key + "@") == true)
+            lastLoadKey = key
+        }
+    }
+
+    private func row(_ thread: OpenThread) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                open(thread)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(thread.location)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.inkSecondary)
+                        if thread.waitingOnMe {
+                            Text("Waiting on you")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Theme.yourMove, in: .capsule)
+                        }
+                    }
+                    Text(Self.preview(thread))
+                        .font(.callout)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if let last = thread.lastReplyBy {
+                        Text("\(thread.noteCount) comments · last from \(last)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.inkTertiary)
+                    }
+                    if let error = model.errors[thread.id] {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(thread.path == nil ? "Open the changes" : "Show this thread in the diff")
+            Button {
+                Task { await model.resolve(thread, on: mr, service: appModel.discussions, me: appModel.mergeRequests.username) }
+            } label: {
+                if model.resolving.contains(thread.id) {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Resolve", systemImage: "checkmark.circle")
+                }
+            }
+            .controlSize(.small)
+            .disabled(model.resolving.contains(thread.id))
+            .help("Mark this thread resolved on GitLab")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// "Dana: Leftover debug **print**?" with inline Markdown rendered, as GitLab shows it.
+    static func preview(_ thread: OpenThread) -> AttributedString {
+        var name = AttributedString("\(thread.startedBy): ")
+        name.inlinePresentationIntent = .stronglyEmphasized
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        let body = (try? AttributedString(markdown: thread.firstNote, options: options)) ?? AttributedString(thread.firstNote)
+        return name + body
+    }
+
+    /// Opens review mode at the thread's line; threads on removed lines open at their file.
+    private func open(_ thread: OpenThread) {
+        appModel.review(mr)
+        if let path = thread.path {
+            appModel.showInDiff(mr: mr, path: path, line: thread.line ?? 0)
+        } else {
+            appModel.detailTab = .changes
         }
     }
 }

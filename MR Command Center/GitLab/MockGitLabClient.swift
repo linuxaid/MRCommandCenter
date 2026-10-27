@@ -36,6 +36,27 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return data.entries.filter { $0.detail.author.id == authorID }.map(\.listItem)
     }
 
+    func setDiscussionResolved(projectID: Int, iid: Int, discussionID: String, resolved: Bool) async throws -> GitLabDiscussion {
+        let entry = try entry(projectID, iid)
+        guard entry.discussions.contains(where: { $0.id == discussionID }) else { throw APIError.notFound }
+        let resolver = GitLabUserRef(id: user.id, username: user.username, name: user.name)
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            guard let index = entry.discussions.firstIndex(where: { $0.id == discussionID }) else { return }
+            entry.discussions[index].notes = entry.discussions[index].notes?.map { note in
+                guard note.resolvable == true else { return note }
+                var note = note
+                note.resolved = resolved
+                note.resolvedBy = resolved ? resolver : nil
+                return note
+            }
+            entry.bumpUpdatedAt()
+        }
+        guard let updated = try self.entry(projectID, iid).discussions.first(where: { $0.id == discussionID }) else {
+            throw APIError.notFound
+        }
+        return updated
+    }
+
     /// Every label the mock data uses, plus a few that no MR has yet.
     func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
         try check()
@@ -238,17 +259,19 @@ nonisolated struct MockGitLabData: Sendable {
                 createdAt: d.createdAt, updatedAt: d.updatedAt.addingTimeInterval(60), sourceBranch: d.sourceBranch,
                 targetBranch: d.targetBranch, author: d.author, draft: d.draft, workInProgress: d.workInProgress,
                 labels: d.labels, sha: d.sha, hasConflicts: d.hasConflicts,
-                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left),
+                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left,
+                                                 unresolved: discussions.count(where: \.isUnresolved)),
                 references: d.references, webUrl: d.webUrl, userNotesCount: d.userNotesCount,
                 mergeWhenPipelineSucceeds: d.mergeWhenPipelineSucceeds, reviewers: d.reviewers,
                 headPipeline: d.headPipeline, diffRefs: d.diffRefs, changesCount: d.changesCount
             )
         }
 
-        private static func status(_ status: String?, approvalsLeft: Int) -> String? {
-            if approvalsLeft == 0 && status == "not_approved" { return "mergeable" }
-            if approvalsLeft > 0 && status == "mergeable" { return "not_approved" }
-            return status
+        /// GitLab's status after approvals or threads changed: approvals are checked first, then threads.
+        private static func status(_ status: String?, approvalsLeft: Int, unresolved: Int) -> String? {
+            guard ["mergeable", "not_approved", "discussions_not_resolved"].contains(status) else { return status }
+            if approvalsLeft > 0 { return "not_approved" }
+            return unresolved > 0 ? "discussions_not_resolved" : "mergeable"
         }
 
         var listItem: GitLabMergeRequest {
