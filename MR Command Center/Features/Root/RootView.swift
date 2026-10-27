@@ -30,6 +30,9 @@ struct RootView: View {
         .sheet(item: Bindable(center).mergeDraft) { draft in
             MergeSheet(draft: draft)
         }
+        .sheet(item: Bindable(center).labelEditor) { target in
+            LabelPicker(editor: LabelEditor(mrKey: target.mrKey, service: center))
+        }
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

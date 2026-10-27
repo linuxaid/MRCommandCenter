@@ -94,6 +94,19 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
                                    body: NewNoteRequest(body: body), decoder: .gitLab)
     }
 
+    func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
+        try await allPages(GitLabLabel.self, path: "/api/v4/projects/\(projectID)/labels", query: [
+            URLQueryItem(name: "include_ancestor_groups", value: "true"),
+        ])
+    }
+
+    func updateLabels(projectID: Int, iid: Int, add: [String], remove: [String]) async throws -> GitLabMergeRequest {
+        let body = UpdateLabelsRequest(addLabels: add.isEmpty ? nil : add.joined(separator: ","),
+                                       removeLabels: remove.isEmpty ? nil : remove.joined(separator: ","))
+        return try await http.put(GitLabMergeRequest.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)",
+                                  body: body, decoder: .gitLab)
+    }
+
     func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
         try await http.post(GitLabApprovals.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/approve",
                             body: ApproveRequest(sha: sha), decoder: .gitLab)

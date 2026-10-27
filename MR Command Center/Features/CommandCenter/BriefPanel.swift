@@ -27,6 +27,9 @@ struct BriefPanel: View {
                     actions
                     MRActionError(mr: mr)
                 }
+                if style == .rail {
+                    EditableLabels(mr: mr)
+                }
                 whatsHappening(situation, tint: tint)
                 if style == .full {
                     ChangesGlance(mr: mr)
@@ -62,7 +65,8 @@ struct BriefPanel: View {
                 .foregroundStyle(Theme.ink)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            MRByline(mr: mr)
+            MRByline(mr: mr, showsLabels: false)
+            EditableLabels(mr: mr)
         }
     }
 
@@ -150,6 +154,8 @@ struct BriefPanel: View {
 /// Author, reference, branches, and labels.
 struct MRByline: View {
     let mr: TrackedMR
+    /// The brief shows labels itself, editable; read-only places show them here.
+    var showsLabels = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -171,10 +177,63 @@ struct MRByline: View {
             }
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(Theme.inkSecondary)
-            if !mr.labels.isEmpty {
+            if showsLabels, !mr.labels.isEmpty {
                 LabelList(labels: mr.labels, styles: mr.labelStyles)
             }
         }
+    }
+}
+
+/// The MR's labels with a remove button on each, and a button to add more (#27).
+struct EditableLabels: View {
+    let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @State private var removing: Set<String> = []
+    @State private var error: String?
+
+    private var center: CommandCenter { appModel.commandCenter }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 6, lineSpacing: 6) {
+                ForEach(mr.labels, id: \.self) { name in
+                    HStack(spacing: 2) {
+                        LabelChip(name: name, style: mr.labelStyles[name])
+                        Button {
+                            Task { await remove(name) }
+                        } label: {
+                            Image(systemName: removing.contains(name) ? "ellipsis" : "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.inkTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(removing.contains(name))
+                        .help("Remove the label “\(name)”")
+                        .accessibilityLabel("Remove label \(name)")
+                    }
+                }
+                Button {
+                    center.editLabels(mr)
+                } label: {
+                    Label(mr.labels.isEmpty ? "Add Label" : "Label", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Add or remove labels (I)")
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.octagon.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func remove(_ name: String) async {
+        removing.insert(name)
+        defer { removing.remove(name) }
+        error = await center.setLabel(name, on: mr, applied: false)
     }
 }
 

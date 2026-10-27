@@ -36,6 +36,26 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return data.entries.filter { $0.detail.author.id == authorID }.map(\.listItem)
     }
 
+    /// Every label the mock data uses, plus a few that no MR has yet.
+    func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
+        try check()
+        return MockGitLabData.projectLabels
+    }
+
+    func updateLabels(projectID: Int, iid: Int, add: [String], remove: [String]) async throws -> GitLabMergeRequest {
+        _ = try entry(projectID, iid)
+        let known = Dictionary(MockGitLabData.projectLabels.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            var labels = (entry.detail.labels ?? []).filter { !remove.contains($0.name) }
+            for name in add where !labels.contains(where: { $0.name == name }) {
+                labels.append(known[name] ?? GitLabLabel(name: name))
+            }
+            entry.detail.labels = labels
+            entry.bumpUpdatedAt()
+        }
+        return try entry(projectID, iid).detail
+    }
+
     func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
         let entry = try entry(projectID, iid)
         guard entry.detail.sha == sha else { throw APIError.server(status: 409) }
@@ -281,6 +301,15 @@ nonisolated struct MockGitLabData: Sendable {
 
     /// The signed-in user in mock mode (`MockGitLabClient.user`).
     static let me = GitLabUser(id: 42, username: "aj", name: "A.J. Reviewer")
+
+    static var projectLabels: [GitLabLabel] {
+        let descriptions = ["needs-design": "Waiting on a design review", "blocked": "Can't move until something else lands",
+                            "ready-for-qa": "Ready for QA to test"]
+        let extra = ["needs-design": "#D9480F", "blocked": "#C92A2A", "ready-for-qa": "#2B8A3E"]
+        return labelColors.merging(extra) { first, _ in first }
+            .map { GitLabLabel(name: $0.key, color: $0.value, textColor: "#FFFFFF", description: descriptions[$0.key]) }
+            .sorted { $0.name < $1.name }
+    }
 
     private static let labelColors = [
         "backend": "#6699CC", "payments": "#009966", "frontend": "#8E44AD", "infra": "#36454F",

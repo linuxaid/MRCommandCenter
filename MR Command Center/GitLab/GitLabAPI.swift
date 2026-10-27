@@ -26,6 +26,10 @@ nonisolated protocol GitLabAPI: Sendable {
     func createDiscussion(projectID: Int, iid: Int, body: String) async throws -> GitLabDiscussion
     /// Replies to an existing thread. Requires the `api` scope.
     func replyToDiscussion(projectID: Int, iid: Int, discussionID: String, body: String) async throws -> GitLabDiscussion.Note
+    /// Every label defined for the project (including inherited group labels). All pages.
+    func projectLabels(projectID: Int) async throws -> [GitLabLabel]
+    /// Adds and removes labels on an MR by name. Requires the `api` scope.
+    func updateLabels(projectID: Int, iid: Int, add: [String], remove: [String]) async throws -> GitLabMergeRequest
     /// Approves the MR at exactly `sha`. Requires the `api` scope.
     func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals
     /// Removes your approval. Requires the `api` scope.

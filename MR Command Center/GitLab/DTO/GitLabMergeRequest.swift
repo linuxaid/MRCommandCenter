@@ -57,11 +57,13 @@ nonisolated struct GitLabLabel: Sendable, Equatable {
     let name: String
     var color: String?
     var textColor: String?
+    /// From the project labels endpoint.
+    var description: String?
 }
 
 extension GitLabLabel: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case name, color, textColor
+        case name, color, textColor, description
     }
 
     nonisolated init(from decoder: any Decoder) throws {
@@ -73,7 +75,8 @@ extension GitLabLabel: Decodable {
         self.init(
             name: try container.decode(String.self, forKey: .name),
             color: try container.decodeIfPresent(String.self, forKey: .color),
-            textColor: try container.decodeIfPresent(String.self, forKey: .textColor)
+            textColor: try container.decodeIfPresent(String.self, forKey: .textColor),
+            description: try container.decodeIfPresent(String.self, forKey: .description)
         )
     }
 }
@@ -134,6 +137,13 @@ nonisolated struct MergeOptions: Encodable, Sendable, Equatable {
     var shouldRemoveSourceBranch: Bool?
     /// Let GitLab merge once the running pipeline passes, instead of merging now.
     var mergeWhenPipelineSucceeds: Bool?
+}
+
+/// Body for `PUT /projects/:id/merge_requests/:iid` that adds or removes labels by name.
+nonisolated struct UpdateLabelsRequest: Encodable, Sendable, Equatable {
+    /// Comma-separated, as GitLab expects.
+    var addLabels: String?
+    var removeLabels: String?
 }
 
 /// Body for `POST /projects/:id/merge_requests/:iid/approve`.

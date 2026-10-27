@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 import SwiftData
 import os
@@ -50,6 +51,12 @@ struct MergeDraft: Identifiable {
     }
 }
 
+/// The MR the label picker is open for.
+struct LabelEditorTarget: Identifiable, Equatable {
+    let mrKey: String
+    var id: String { mrKey }
+}
+
 /// What the main window's sidebar points at.
 enum Destination: Hashable {
     case briefing
@@ -75,6 +82,13 @@ final class CommandCenter {
     private(set) var actionErrors: [String: String] = [:]
     /// The MR waiting for you to confirm a merge (drives the merge sheet).
     var mergeDraft: MergeDraft?
+    /// The MR whose labels are being edited (drives the label picker, opened with I).
+    var labelEditor: LabelEditorTarget?
+    /// The last labels fetched per project, shown while a fresh list loads.
+    private var projectLabelCache: [Int: [GitLabLabel]] = [:]
+    /// One label change at a time per MR: each GitLab reply carries the whole label set,
+    /// so replies arriving out of order would undo each other.
+    private var labelTasks: [String: Task<String?, Never>] = [:]
     /// Merges you started that failed after the dialog closed, newest first. Shown as a banner
     /// until dismissed, since you've usually moved on to another MR by then.
     private(set) var mergeFailures: [MergeFailure] = []
@@ -430,6 +444,87 @@ final class CommandCenter {
             "GitLab couldn't merge the branch (406), usually because of conflicts."
         case .server(status: 422)?:
             "GitLab rejected the merge (422)."
+        default:
+            error.localizedDescription
+        }
+    }
+
+    // MARK: Labels
+
+    /// Whether a press of I opens the label picker: not with ⌘, ⌥ or ⌃ held, and not while a
+    /// comment is being written.
+    nonisolated static func opensLabelPicker(modifiers: EventModifiers, isComposing: Bool) -> Bool {
+        modifiers.isDisjoint(with: [.command, .option, .control]) && !isComposing
+    }
+
+    /// Opens the label picker for an MR.
+    func editLabels(_ mr: TrackedMR) {
+        labelEditor = LabelEditorTarget(mrKey: mr.key)
+    }
+
+    /// The labels last fetched for the MR's project, if any.
+    func cachedProjectLabels(for mr: TrackedMR) -> [GitLabLabel]? {
+        projectLabelCache[mr.projectID]
+    }
+
+    /// The labels defined in the MR's project, sorted by name. Always asks GitLab, so labels
+    /// created since the last look show up.
+    func projectLabels(for mr: TrackedMR) async throws -> [GitLabLabel] {
+        let client = try dependencies.gitLabClient(settings: settings)
+        let labels = try await client.projectLabels(projectID: mr.projectID)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        projectLabelCache[mr.projectID] = labels
+        return labels
+    }
+
+    /// Adds (`applied: true`) or removes a label on the MR, after any change already in flight
+    /// for it. Returns a readable error, or nil on success.
+    func setLabel(_ name: String, on mr: TrackedMR, applied: Bool) async -> String? {
+        let key = mr.key
+        let previous = labelTasks[key]
+        let task = Task { [weak self] () -> String? in
+            _ = await previous?.value
+            return await self?.applyLabel(name, on: mr, applied: applied)
+        }
+        labelTasks[key] = task
+        let result = await task.value
+        if labelTasks[key] == task { labelTasks[key] = nil }
+        return result
+    }
+
+    private func applyLabel(_ name: String, on mr: TrackedMR, applied: Bool) async -> String? {
+        do {
+            let client = try dependencies.gitLabClient(settings: settings)
+            let updated = try await client.updateLabels(projectID: mr.projectID, iid: mr.iid,
+                                                        add: applied ? [name] : [], remove: applied ? [] : [name])
+            // Only the labels: taking the rest of the reply would hide other changes from the next refresh.
+            mr.labels = updated.labels?.map(\.name) ?? []
+            // The reply names labels without colors; use the project's.
+            let known = (projectLabelCache[mr.projectID] ?? []).filter { mr.labels.contains($0.name) }
+            mr.labelStylesData = TrackedMR.mergedStyles(existing: mr.labelStylesData, with: (updated.labels ?? []) + known)
+            store.record(.init(kind: .other, message: applied ? "You added the label “\(name)”" : "You removed the label “\(name)”"), for: mr)
+            save()
+            return nil
+        } catch {
+            Log.sync.error("Label update failed: \(error.localizedDescription, privacy: .public)")
+            return Self.describeLabelFailure(error, changing: true)
+        }
+    }
+
+    static func describeLabelFailure(_ error: any Error, changing: Bool) -> String {
+        switch error as? APIError {
+        case .forbidden?:
+            changing
+                ? "GitLab refused (403). Changing labels needs a token with the api scope and permission to edit this merge request."
+                : "GitLab refused (403). Your account can't see this project's labels."
+        case .unauthorized?:
+            "GitLab didn't accept the token (401). It may have expired; check Settings → Accounts."
+        case .notFound?:
+            "GitLab couldn't find this merge request or project (404)."
+        case .server(status: 422)?:
+            "GitLab rejected the label change (422). The label may have been renamed or deleted."
+        case .server(status: 409)?:
+            "Someone else changed this merge request at the same moment (409). Try again."
         default:
             error.localizedDescription
         }
