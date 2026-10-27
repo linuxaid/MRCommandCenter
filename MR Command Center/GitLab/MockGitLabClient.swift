@@ -36,6 +36,47 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return data.entries.filter { $0.detail.author.id == authorID }.map(\.listItem)
     }
 
+    func setDiscussionResolved(projectID: Int, iid: Int, discussionID: String, resolved: Bool) async throws -> GitLabDiscussion {
+        let entry = try entry(projectID, iid)
+        guard entry.discussions.contains(where: { $0.id == discussionID }) else { throw APIError.notFound }
+        let resolver = GitLabUserRef(id: user.id, username: user.username, name: user.name)
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            guard let index = entry.discussions.firstIndex(where: { $0.id == discussionID }) else { return }
+            entry.discussions[index].notes = entry.discussions[index].notes?.map { note in
+                guard note.resolvable == true else { return note }
+                var note = note
+                note.resolved = resolved
+                note.resolvedBy = resolved ? resolver : nil
+                return note
+            }
+            entry.bumpUpdatedAt()
+        }
+        guard let updated = try self.entry(projectID, iid).discussions.first(where: { $0.id == discussionID }) else {
+            throw APIError.notFound
+        }
+        return updated
+    }
+
+    /// Every label the mock data uses, plus a few that no MR has yet.
+    func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
+        try check()
+        return MockGitLabData.projectLabels
+    }
+
+    func updateLabels(projectID: Int, iid: Int, add: [String], remove: [String]) async throws -> GitLabMergeRequest {
+        _ = try entry(projectID, iid)
+        let known = Dictionary(MockGitLabData.projectLabels.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            var labels = (entry.detail.labels ?? []).filter { !remove.contains($0.name) }
+            for name in add where !labels.contains(where: { $0.name == name }) {
+                labels.append(known[name] ?? GitLabLabel(name: name))
+            }
+            entry.detail.labels = labels
+            entry.bumpUpdatedAt()
+        }
+        return try entry(projectID, iid).detail
+    }
+
     func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
         let entry = try entry(projectID, iid)
         guard entry.detail.sha == sha else { throw APIError.server(status: 409) }
@@ -105,6 +146,17 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         }
         let last = lines.keys.max() ?? 0
         return (1...max(last, 1)).map { lines[$0] ?? "" }.joined(separator: "\n")
+    }
+
+    /// Images in the mock diffs come back as a generated PNG (`MockImages`); anything else as its text.
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
+        try check()
+        let diffs = data.entries.filter { $0.detail.projectId == projectID }.flatMap(\.diffs)
+        guard diffs.contains(where: { $0.newPath == path || $0.oldPath == path }) else { throw APIError.notFound }
+        if ImagePreview.isImage(path) {
+            return MockImages.png(width: MockImages.size.width, height: MockImages.size.height)
+        }
+        return Data(try await fileContent(projectID: projectID, path: path, ref: ref).utf8)
     }
 
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {
@@ -207,17 +259,19 @@ nonisolated struct MockGitLabData: Sendable {
                 createdAt: d.createdAt, updatedAt: d.updatedAt.addingTimeInterval(60), sourceBranch: d.sourceBranch,
                 targetBranch: d.targetBranch, author: d.author, draft: d.draft, workInProgress: d.workInProgress,
                 labels: d.labels, sha: d.sha, hasConflicts: d.hasConflicts,
-                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left),
+                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left,
+                                                 unresolved: discussions.count(where: \.isUnresolved)),
                 references: d.references, webUrl: d.webUrl, userNotesCount: d.userNotesCount,
                 mergeWhenPipelineSucceeds: d.mergeWhenPipelineSucceeds, reviewers: d.reviewers,
                 headPipeline: d.headPipeline, diffRefs: d.diffRefs, changesCount: d.changesCount
             )
         }
 
-        private static func status(_ status: String?, approvalsLeft: Int) -> String? {
-            if approvalsLeft == 0 && status == "not_approved" { return "mergeable" }
-            if approvalsLeft > 0 && status == "mergeable" { return "not_approved" }
-            return status
+        /// GitLab's status after approvals or threads changed: approvals are checked first, then threads.
+        private static func status(_ status: String?, approvalsLeft: Int, unresolved: Int) -> String? {
+            guard ["mergeable", "not_approved", "discussions_not_resolved"].contains(status) else { return status }
+            if approvalsLeft > 0 { return "not_approved" }
+            return unresolved > 0 ? "discussions_not_resolved" : "mergeable"
         }
 
         var listItem: GitLabMergeRequest {
@@ -270,6 +324,15 @@ nonisolated struct MockGitLabData: Sendable {
 
     /// The signed-in user in mock mode (`MockGitLabClient.user`).
     static let me = GitLabUser(id: 42, username: "aj", name: "A.J. Reviewer")
+
+    static var projectLabels: [GitLabLabel] {
+        let descriptions = ["needs-design": "Waiting on a design review", "blocked": "Can't move until something else lands",
+                            "ready-for-qa": "Ready for QA to test"]
+        let extra = ["needs-design": "#D9480F", "blocked": "#C92A2A", "ready-for-qa": "#2B8A3E"]
+        return labelColors.merging(extra) { first, _ in first }
+            .map { GitLabLabel(name: $0.key, color: $0.value, textColor: "#FFFFFF", description: descriptions[$0.key]) }
+            .sorted { $0.name < $1.name }
+    }
 
     private static let labelColors = [
         "backend": "#6699CC", "payments": "#009966", "frontend": "#8E44AD", "infra": "#36454F",

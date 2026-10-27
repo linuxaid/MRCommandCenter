@@ -68,11 +68,14 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
     }
 
     func fileContent(projectID: Int, path: String, ref: String) async throws -> String {
+        String(decoding: try await rawFile(projectID: projectID, path: path, ref: ref), as: UTF8.self)
+    }
+
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? path
         let request = try http.makeRequest(path: "/api/v4/projects/\(projectID)/repository/files/\(encoded)/raw",
                                            query: [URLQueryItem(name: "ref", value: ref)])
-        let response = try await http.send(request)
-        return String(decoding: response.data, as: UTF8.self)
+        return try await http.send(request).data
     }
 
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {
@@ -89,6 +92,25 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
         let id = discussionID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? discussionID
         return try await http.post(GitLabDiscussion.Note.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/discussions/\(id)/notes",
                                    body: NewNoteRequest(body: body), decoder: .gitLab)
+    }
+
+    func setDiscussionResolved(projectID: Int, iid: Int, discussionID: String, resolved: Bool) async throws -> GitLabDiscussion {
+        let id = discussionID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? discussionID
+        return try await http.put(GitLabDiscussion.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/discussions/\(id)",
+                                  body: ResolveDiscussionRequest(resolved: resolved), decoder: .gitLab)
+    }
+
+    func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
+        try await allPages(GitLabLabel.self, path: "/api/v4/projects/\(projectID)/labels", query: [
+            URLQueryItem(name: "include_ancestor_groups", value: "true"),
+        ])
+    }
+
+    func updateLabels(projectID: Int, iid: Int, add: [String], remove: [String]) async throws -> GitLabMergeRequest {
+        let body = UpdateLabelsRequest(addLabels: add.isEmpty ? nil : add.joined(separator: ","),
+                                       removeLabels: remove.isEmpty ? nil : remove.joined(separator: ","))
+        return try await http.put(GitLabMergeRequest.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)",
+                                  body: body, decoder: .gitLab)
     }
 
     func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {

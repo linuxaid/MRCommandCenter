@@ -48,6 +48,13 @@ struct AppCommands: Commands {
             .keyboardShortcut("a", modifiers: [.command, .shift])
             .disabled(store.selected == nil || store.selected?.isAuthor == true)
 
+            // No key equivalent: a bare "I" menu shortcut would swallow typing. I works in the list and review.
+            Button("Labels…") {
+                guard let mr = store.selected else { return }
+                center.editLabels(mr)
+            }
+            .disabled(store.selected == nil)
+
             Button("Merge…") {
                 guard let mr = store.selected else { return }
                 center.requestMerge(mr)

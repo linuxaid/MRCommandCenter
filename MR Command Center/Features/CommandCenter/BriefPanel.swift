@@ -27,11 +27,15 @@ struct BriefPanel: View {
                     actions
                     MRActionError(mr: mr)
                 }
+                if style == .rail {
+                    EditableLabels(mr: mr)
+                }
                 whatsHappening(situation, tint: tint)
                 if style == .full {
                     ChangesGlance(mr: mr)
                 }
                 ReadinessChecklist(mr: mr, readiness: situation.readiness, me: appModel.mergeRequests.username)
+                OpenThreadsCard(mr: mr)
                 AutoMergeCard(mr: mr, situation: situation)
                 ContextCard(mr: mr)
                 RecentActivity(mrKey: mr.key)
@@ -62,7 +66,8 @@ struct BriefPanel: View {
                 .foregroundStyle(Theme.ink)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            MRByline(mr: mr)
+            MRByline(mr: mr, showsLabels: false)
+            EditableLabels(mr: mr)
         }
     }
 
@@ -150,6 +155,8 @@ struct BriefPanel: View {
 /// Author, reference, branches, and labels.
 struct MRByline: View {
     let mr: TrackedMR
+    /// The brief shows labels itself, editable; read-only places show them here.
+    var showsLabels = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -171,10 +178,63 @@ struct MRByline: View {
             }
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(Theme.inkSecondary)
-            if !mr.labels.isEmpty {
+            if showsLabels, !mr.labels.isEmpty {
                 LabelList(labels: mr.labels, styles: mr.labelStyles)
             }
         }
+    }
+}
+
+/// The MR's labels with a remove button on each, and a button to add more (#27).
+struct EditableLabels: View {
+    let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @State private var removing: Set<String> = []
+    @State private var error: String?
+
+    private var center: CommandCenter { appModel.commandCenter }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 6, lineSpacing: 6) {
+                ForEach(mr.labels, id: \.self) { name in
+                    HStack(spacing: 2) {
+                        LabelChip(name: name, style: mr.labelStyles[name])
+                        Button {
+                            Task { await remove(name) }
+                        } label: {
+                            Image(systemName: removing.contains(name) ? "ellipsis" : "xmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.inkTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(removing.contains(name))
+                        .help("Remove the label “\(name)”")
+                        .accessibilityLabel("Remove label \(name)")
+                    }
+                }
+                Button {
+                    center.editLabels(mr)
+                } label: {
+                    Label(mr.labels.isEmpty ? "Add Label" : "Label", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Add or remove labels (I)")
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.octagon.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func remove(_ name: String) async {
+        removing.insert(name)
+        defer { removing.remove(name) }
+        error = await center.setLabel(name, on: mr, applied: false)
     }
 }
 
@@ -480,37 +540,293 @@ private struct AutoMergeCard: View {
     }
 }
 
-/// Jira, static checks, and the AI verdict, one line each.
-private struct ContextCard: View {
+private struct ThreadsLoadKey: Equatable {
+    let key: String
+    let updatedAt: Date
+    let unresolved: Int
+    let awaitingMe: Int
+
+    init(mr: TrackedMR) {
+        key = mr.key
+        updatedAt = mr.lastSeenUpdatedAt
+        unresolved = mr.unresolvedDiscussions
+        awaitingMe = mr.threadsAwaitingMe
+    }
+}
+
+/// Every unresolved comment thread, with Resolve (#28). Click a thread to see it on its line.
+private struct OpenThreadsCard: View {
     let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @State private var model = OpenThreadsModel()
+    @State private var lastLoadKey: String?
 
     var body: some View {
+        let showsCard = model.hasLoaded ? (!model.threads.isEmpty || model.loadError != nil) : mr.unresolvedDiscussions > 0
+        Group {
+            if showsCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("OPEN THREADS").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+                        Spacer()
+                        if !model.threads.isEmpty {
+                            Text("\(model.threads.count) to resolve").font(.caption).foregroundStyle(Theme.inkTertiary)
+                        }
+                    }
+                    VStack(spacing: 0) {
+                        if !model.hasLoaded {
+                            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(14)
+                        } else if let error = model.loadError, model.threads.isEmpty {
+                            Label("Couldn't load the threads: \(error)", systemImage: "exclamationmark.triangle")
+                                .font(.callout).foregroundStyle(Theme.caution).padding(14)
+                        }
+                        ForEach(Array(model.threads.enumerated()), id: \.element.id) { index, thread in
+                            if index > 0 { Divider().padding(.leading, 14) }
+                            row(thread)
+                        }
+                    }
+                    .card()
+                }
+            }
+        }
+        // Reload when the MR changes on GitLab (skipping the short cache so new threads show), and
+        // when its thread counts change, e.g. a thread resolved in the diff beside this rail.
+        .task(id: ThreadsLoadKey(mr: mr)) {
+            let key = "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)"
+            await model.load(mr, service: appModel.discussions, me: appModel.mergeRequests.username,
+                             force: lastLoadKey != nil && lastLoadKey != key && lastLoadKey?.hasPrefix(mr.key + "@") == true)
+            lastLoadKey = key
+        }
+    }
+
+    private func row(_ thread: OpenThread) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                open(thread)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(thread.location)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.inkSecondary)
+                        if thread.waitingOnMe {
+                            Text("Waiting on you")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Theme.yourMove, in: .capsule)
+                        }
+                    }
+                    Text(Self.preview(thread))
+                        .font(.callout)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if let last = thread.lastReplyBy {
+                        Text("\(thread.noteCount) comments · last from \(last)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.inkTertiary)
+                    }
+                    if let error = model.errors[thread.id] {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(Theme.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(thread.path == nil ? "Open the changes" : "Show this thread in the diff")
+            Button {
+                Task { await model.resolve(thread, on: mr, service: appModel.discussions, me: appModel.mergeRequests.username) }
+            } label: {
+                if model.resolving.contains(thread.id) {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Resolve", systemImage: "checkmark.circle")
+                }
+            }
+            .controlSize(.small)
+            .disabled(model.resolving.contains(thread.id))
+            .help("Mark this thread resolved on GitLab")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// "Dana: Leftover debug **print**?" with inline Markdown rendered, as GitLab shows it.
+    static func preview(_ thread: OpenThread) -> AttributedString {
+        var name = AttributedString("\(thread.startedBy): ")
+        name.inlinePresentationIntent = .stronglyEmphasized
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        let body = (try? AttributedString(markdown: thread.firstNote, options: options)) ?? AttributedString(thread.firstNote)
+        return name + body
+    }
+
+    /// Opens review mode at the thread's line; threads on removed lines open at their file.
+    private func open(_ thread: OpenThread) {
+        appModel.review(mr)
+        if let path = thread.path {
+            appModel.showInDiff(mr: mr, path: path, line: thread.line ?? 0)
+        } else {
+            appModel.detailTab = .changes
+        }
+    }
+}
+
+/// The MR's Jira issue in detail (#25): status, type, priority, fix version, and assignee,
+/// with the description to expand. The AI verdict sits underneath on its own line.
+private struct ContextCard: View {
+    let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @Query private var settingsRows: [AccountSettings]
+    @State private var showsStory = false
+
+    var body: some View {
+        let summary = JiraSummary.make(for: mr, details: appModel.jira.details(for: mr.jiraKey))
         VStack(alignment: .leading, spacing: 10) {
-            Text("CONTEXT").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
-            VStack(alignment: .leading, spacing: 8) {
-                line("Jira", MRStatusLine.jiraItem(for: mr))
-                line("Checks", MRStatusLine.checksItem(for: mr))
-                line("AI review", MRStatusLine.aiItem(for: mr))
+            Text("JIRA").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+            VStack(alignment: .leading, spacing: 10) {
+                switch summary.state {
+                case .found:
+                    found(summary)
+                case .noKey(let branch):
+                    message("No Jira key in branch \(branch)", systemImage: "ticket", tone: Theme.caution)
+                case .notConnected:
+                    VStack(alignment: .leading, spacing: 6) {
+                        message("\(summary.key ?? ""): connect Jira to see its details.", systemImage: "ticket", tone: Theme.inkSecondary)
+                        SettingsLink { Text("Open Accounts…") }.font(.callout)
+                    }
+                case .loading:
+                    HStack {
+                        Text(summary.key ?? "").font(.callout.monospaced())
+                        ProgressView().controlSize(.small)
+                    }
+                case .notFound:
+                    message("\(summary.key ?? "") wasn't found in Jira, or your token can't see it.",
+                            systemImage: "xmark.octagon", tone: Theme.danger)
+                case .failed(let error):
+                    message("\(summary.key ?? ""): \(error)", systemImage: "exclamationmark.triangle", tone: Theme.caution)
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card()
+            Text("AI REVIEW").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+                .padding(.top, 8)
+            aiLine
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card()
         }
     }
 
-    private func line(_ title: String, _ item: StatusItem) -> some View {
-        HStack {
-            Text(title).foregroundStyle(Theme.inkSecondary).frame(width: 80, alignment: .leading)
-            Label {
-                Text(item.title).foregroundStyle(Theme.ink)
-            } icon: {
-                Image(systemName: item.systemImage).foregroundStyle(item.tone.color)
+    @ViewBuilder
+    private func found(_ summary: JiraSummary) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let key = summary.key, let url = browseURL(key) {
+                Link(key, destination: url)
+                    .font(.callout.monospaced().weight(.semibold))
+                    .help("Open \(key) in Jira")
+            } else {
+                Text(summary.key ?? "").font(.callout.monospaced().weight(.semibold))
             }
-            Spacer()
+            if let title = summary.title {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+        // Plain rows with a fixed label width: a `Grid` here caused AppKit layout loops (PLAN.md).
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(summary.rows) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(row.label)
+                        .foregroundStyle(Theme.inkSecondary)
+                        .frame(width: 84, alignment: .leading)
+                    Group {
+                        switch row.tone {
+                        case .positive:
+                            Label(row.value, systemImage: "checkmark.circle.fill").foregroundStyle(Theme.ready)
+                        case .warning:
+                            Label(row.value, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.caution)
+                        case .normal:
+                            Text(row.value).foregroundStyle(Theme.ink)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .font(.callout)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityText(row))
+            }
+        }
+        if let error = summary.staleError {
+            Label("Last refresh failed, so this may be out of date: \(error)", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(Theme.caution)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if summary.hasExpandableText {
+            DisclosureGroup(isExpanded: $showsStory) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let description = summary.description {
+                        Text(description)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let criteria = summary.acceptanceCriteria {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Acceptance criteria").fontWeight(.semibold)
+                            Text(criteria).textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(Theme.ink)
+                .padding(.top, 6)
+            } label: {
+                Text(summary.description != nil ? "Description" : "Acceptance criteria")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(Theme.inkSecondary)
+            }
+        }
+    }
+
+    private func accessibilityText(_ row: JiraSummary.Row) -> String {
+        switch (row.label, row.tone) {
+        case ("Status", .positive): "Status: \(row.value), passing"
+        case ("Status", .warning): "Status: \(row.value), not a passing status"
+        case (_, .warning): "\(row.label): \(row.value), needs attention"
+        default: "\(row.label): \(row.value)"
+        }
+    }
+
+    private func message(_ text: String, systemImage: String, tone: Color) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.callout)
+            .foregroundStyle(tone)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var aiLine: some View {
+        let item = MRStatusLine.aiItem(for: mr)
+        return HStack(spacing: 6) {
+            Image(systemName: item.systemImage).foregroundStyle(item.tone.color)
+            Text(item.title).foregroundStyle(Theme.ink)
         }
         .font(.callout)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title): \(item.accessibilityLabel)")
+        .accessibilityLabel(item.accessibilityLabel)
+    }
+
+    private func browseURL(_ key: String) -> URL? {
+        settingsRows.first?.jiraBrowseURL(for: key)
     }
 }
 

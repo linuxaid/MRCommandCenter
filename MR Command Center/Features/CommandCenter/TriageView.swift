@@ -73,6 +73,12 @@ struct TriageView: View {
         .focused($isFocused)
         .onKeyPress(.downArrow) { center.selectNext(); return .handled }
         .onKeyPress(.upArrow) { center.selectPrevious(); return .handled }
+        .onKeyPress(characters: CharacterSet(charactersIn: "iI")) { press in
+            guard CommandCenter.opensLabelPicker(modifiers: press.modifiers, isComposing: false),
+                  let mr = store.selected else { return .ignored }
+            center.editLabels(mr)
+            return .handled
+        }
         .onKeyPress(.return) {
             guard let mr = store.selected else { return .ignored }
             appModel.review(mr)
@@ -214,6 +220,7 @@ private struct LaneSection: View {
 struct TriageRow: View {
     let mr: TrackedMR
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var store: MergeRequestStore { appModel.mergeRequests }
 
@@ -221,6 +228,8 @@ struct TriageRow: View {
         let situation = appModel.commandCenter.situation(for: mr)
         let tint = Theme.color(for: situation.lane)
         let isSelected = store.selectedKey == mr.key
+        let style = CardSelectionStyle.style(isSelected: isSelected)
+        let selectionColor = Theme.selectionColor(for: situation.lane)
 
         HStack(alignment: .top, spacing: 12) {
             Avatar(name: mr.authorName, size: 28)
@@ -268,13 +277,24 @@ struct TriageRow: View {
             }
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, 14)
+        .padding(.leading, style.contentLeadingInset)
+        // Room for the chevron in every state, so selecting a row doesn't shift its text.
+        .padding(.trailing, style.contentTrailingInset)
+        .overlay(alignment: .trailing) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(selectionColor)
+                .padding(.trailing, 12)
+                .opacity(style.showsMarker ? 1 : 0)
+                .accessibilityHidden(true)
+        }
         .overlay(alignment: .leading) {
             UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10)
-                .fill(tint)
-                .frame(width: 4)
+                .fill(isSelected ? selectionColor : tint)
+                .frame(width: style.accentBarWidth)
         }
-        .card(isSelected: isSelected, accent: tint)
+        .card(isSelected: isSelected, accent: selectionColor)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)
         .contentShape(.rect)
         .onTapGesture { store.selectedKey = mr.key }
         .simultaneousGesture(TapGesture(count: 2).onEnded { appModel.review(mr) })
@@ -295,6 +315,7 @@ private struct RowMenu: View {
         if !mr.isAuthor, let me = appModel.mergeRequests.username, !mr.approvedByUsernames.contains(me) {
             Button("Approve") { Task { await appModel.commandCenter.approve(mr) } }
         }
+        Button("Labels…") { appModel.commandCenter.editLabels(mr) }
         Button("Merge…") { appModel.commandCenter.requestMerge(mr) }
             .disabled(mr.isDraft || !mr.hasLoadedDetails)
         Divider()

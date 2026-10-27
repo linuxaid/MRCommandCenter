@@ -9,6 +9,9 @@ struct FileDiffView: View {
     let isCollapsed: Bool
     let expand: () -> Void
     let openInBrowser: () -> Void
+    /// Needed to fetch image previews for binary image files; without it they show a placeholder.
+    var mr: TrackedMR?
+    var refs: DiffRefs?
 
     /// Too narrow for two columns: always show unified and hide the layout picker.
     @State private var isNarrow = false
@@ -85,8 +88,13 @@ struct FileDiffView: View {
     private func body(for file: DiffFile) -> some View {
         switch file.unavailable {
         case .binary:
-            ContentUnavailableView("Binary File", systemImage: "doc.zipper",
-                                   description: Text("Binary files aren't shown as a diff."))
+            if let mr, ImagePreview.isImage(file.path) {
+                ImagePreviewView(file: file, mr: mr, refs: refs, openInBrowser: openInBrowser)
+                    .id(file.id)
+            } else {
+                ContentUnavailableView("Binary File", systemImage: "doc.zipper",
+                                       description: Text("Binary files aren't shown as a diff."))
+            }
         case .tooLarge:
             unavailableInGitLab(title: "Diff Too Large",
                                 reason: "GitLab didn't include this diff because it exceeds the size limit.")
@@ -103,9 +111,11 @@ struct FileDiffView: View {
             if isCollapsed {
                 collapsedPlaceholder
             } else {
+                // A new identity per file gives each file a fresh scroll view, so stepping to
+                // another file (↑/↓) starts at its top instead of the previous file's offset.
                 switch effectiveLayout {
-                case .unified: UnifiedDiffView(file: file, scrollRequest: scrollRequest)
-                case .sideBySide: SideBySideDiffView(file: file, scrollRequest: scrollRequest)
+                case .unified: UnifiedDiffView(file: file, scrollRequest: scrollRequest).id(file.id)
+                case .sideBySide: SideBySideDiffView(file: file, scrollRequest: scrollRequest).id(file.id)
                 }
             }
         }

@@ -26,7 +26,7 @@ struct ChangesView: View {
     var body: some View {
         withAI
             // Reload threads when the diff loads and whenever the MR changes on GitLab.
-            .task(id: CommentsKey(diffSHA: model.diff?.headSHA, updatedAt: mr.lastSeenUpdatedAt)) {
+            .task(id: CommentsKey(diffSHA: model.diff?.headSHA, updatedAt: mr.lastSeenUpdatedAt, unresolved: mr.unresolvedDiscussions)) {
                 guard let diff = model.diff else { return }
                 await comments.load(mr: mr, diff: diff, service: appModel.discussions)
             }
@@ -128,6 +128,14 @@ struct ChangesView: View {
             .focusable()
             .focusEffectDisabled()
             .focused($isFocused)
+            // I opens the label picker (#27). On the diff itself, so typing in a comment box isn't caught.
+            .onKeyPress(characters: CharacterSet(charactersIn: "iI")) { press in
+                guard CommandCenter.opensLabelPicker(modifiers: press.modifiers, isComposing: comments.activeTarget != nil) else {
+                    return .ignored
+                }
+                appModel.commandCenter.editLabels(mr)
+                return .handled
+            }
             .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                 let handled = model.handleArrow(
                     by: press.key == .downArrow ? 1 : -1,
@@ -150,7 +158,9 @@ struct ChangesView: View {
                     layout: $layout,
                     isCollapsed: model.isCollapsed(file, threshold: collapseThreshold),
                     expand: { model.expandedFileIDs.insert(file.id) },
-                    openInBrowser: { openInBrowser(file) }
+                    openInBrowser: { openInBrowser(file) },
+                    mr: mr,
+                    refs: model.diff?.refs
                 )
             } else {
                 ContentUnavailableView("No File Selected", systemImage: "doc")
@@ -253,6 +263,8 @@ private struct AIStrip: View {
 private struct CommentsKey: Equatable {
     let diffSHA: String?
     let updatedAt: Date
+    /// Changes when a thread is resolved elsewhere (the brief rail), so the diff redraws from the shared cache.
+    var unresolved = 0
 }
 
 private struct DiffFileList: View {

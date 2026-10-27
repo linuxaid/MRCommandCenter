@@ -6,8 +6,13 @@ struct UnifiedDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
     @State private var highlighted: DiffLine.ID?
+    /// Syntax colors per line (#26), and the hunks they were worked out for: colors are only
+    /// used while they still match what's shown, so a refresh never paints old colors on new text.
+    @State private var syntax = SyntaxHighlighter.Highlighted()
+    @State private var syntaxHunks: [DiffHunk] = []
 
     var body: some View {
+        let colors = syntaxHunks == file.hunks ? syntax : SyntaxHighlighter.Highlighted()
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -16,7 +21,7 @@ struct UnifiedDiffView: View {
                         HunkHeaderRow(hunk: hunk)
                         ForEach(hunk.lines) { line in
                             VStack(alignment: .leading, spacing: 0) {
-                                UnifiedLineRow(fileID: file.id, line: line, isHighlighted: highlighted == line.id)
+                                UnifiedLineRow(fileID: file.id, line: line, tokens: colors.unified(line), isHighlighted: highlighted == line.id)
                                 LineThreads(fileID: file.id, line: line)
                             }
                             .id(line.id)
@@ -25,19 +30,27 @@ struct UnifiedDiffView: View {
                 }
                 .textSelection(.enabled)
             }
-            .onAppear { scroll(proxy) }
-            .onChange(of: scrollRequest?.id) { scroll(proxy) }
+            .onAppear { scroll(proxy, animated: false) }
+            .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
+            // Keyed by content: a refresh can bring new hunks under the same file ID.
+            .task(id: file.hunks) {
+                let result = await SyntaxHighlighter.highlightOffMain(file)
+                guard !Task.isCancelled else { return }
+                syntax = result
+                syntaxHunks = file.hunks
+            }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
     }
 
-    private func scroll(_ proxy: ScrollViewProxy) {
+    /// Opening a file at a line lands there directly; a new target in an open file animates.
+    private func scroll(_ proxy: ScrollViewProxy, animated: Bool) {
         guard let request = scrollRequest,
               let target = file.hunks.lazy.flatMap(\.lines).first(where: { $0.kind != .deletion && $0.newNumber == request.line })
         else { return }
         Task {
-            withAnimation { proxy.scrollTo(target.id, anchor: .center) }
+            withAnimation(animated ? .default : nil) { proxy.scrollTo(target.id, anchor: .center) }
             await flash(target.id)
         }
     }
@@ -52,9 +65,14 @@ struct UnifiedDiffView: View {
 struct SideBySideDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
+    /// Syntax colors per line (#26), and the hunks they were worked out for: colors are only
+    /// used while they still match what's shown, so a refresh never paints old colors on new text.
+    @State private var syntax = SyntaxHighlighter.Highlighted()
+    @State private var syntaxHunks: [DiffHunk] = []
     @State private var highlighted: SplitRow.ID?
 
     var body: some View {
+        let colors = syntaxHunks == file.hunks ? syntax : SyntaxHighlighter.Highlighted()
         ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -64,9 +82,9 @@ struct SideBySideDiffView: View {
                     ForEach(SideBySide.rows(for: hunk)) { row in
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(alignment: .top, spacing: 0) {
-                                SplitCell(fileID: file.id, line: row.left, side: .old)
+                                SplitCell(fileID: file.id, line: row.left, side: .old, tokens: row.left.flatMap { colors.old[$0.id] })
                                 Divider()
-                                SplitCell(fileID: file.id, line: row.right, side: .new)
+                                SplitCell(fileID: file.id, line: row.right, side: .new, tokens: row.right.flatMap { colors.new[$0.id] })
                             }
                             if let left = row.left {
                                 LineThreads(fileID: file.id, line: left)
@@ -82,19 +100,27 @@ struct SideBySideDiffView: View {
             }
             .textSelection(.enabled)
         }
-        .onAppear { scroll(proxy) }
-        .onChange(of: scrollRequest?.id) { scroll(proxy) }
+        .onAppear { scroll(proxy, animated: false) }
+        .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
+            // Keyed by content: a refresh can bring new hunks under the same file ID.
+            .task(id: file.hunks) {
+                let result = await SyntaxHighlighter.highlightOffMain(file)
+                guard !Task.isCancelled else { return }
+                syntax = result
+                syntaxHunks = file.hunks
+            }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
     }
 
-    private func scroll(_ proxy: ScrollViewProxy) {
+    /// Opening a file at a line lands there directly; a new target in an open file animates.
+    private func scroll(_ proxy: ScrollViewProxy, animated: Bool) {
         guard let request = scrollRequest else { return }
         let rows = file.hunks.flatMap(SideBySide.rows(for:))
         guard let target = rows.first(where: { $0.right?.newNumber == request.line }) else { return }
         Task {
-            withAnimation { proxy.scrollTo(target.id, anchor: .center) }
+            withAnimation(animated ? .default : nil) { proxy.scrollTo(target.id, anchor: .center) }
             highlighted = target.id
             try? await Task.sleep(for: .seconds(2))
             if highlighted == target.id { withAnimation { highlighted = nil } }
@@ -120,6 +146,7 @@ private struct HunkHeaderRow: View {
 private struct UnifiedLineRow: View {
     let fileID: DiffFile.ID
     let line: DiffLine
+    var tokens: [SyntaxToken]?
     var isHighlighted = false
     @State private var isHovered = false
 
@@ -131,7 +158,7 @@ private struct UnifiedLineRow: View {
             Text(line.kind.marker)
                 .frame(width: 16)
                 .foregroundStyle(line.kind.markerColor)
-            Text(displayText(line))
+            Text(coloredText(line, tokens: tokens))
                 .foregroundStyle(line.kind == .noNewline ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -172,6 +199,7 @@ private struct SplitCell: View {
     let fileID: DiffFile.ID
     let line: DiffLine?
     let side: Side
+    var tokens: [SyntaxToken]?
     @State private var isHovered = false
 
     var body: some View {
@@ -185,7 +213,7 @@ private struct SplitCell: View {
             Text(line.map { $0.kind == .context ? " " : $0.kind.marker } ?? " ")
                 .frame(width: 16)
                 .foregroundStyle(line?.kind.markerColor ?? .clear)
-            Text(line.map(displayText) ?? "")
+            Text(line.map { coloredText($0, tokens: tokens) } ?? AttributedString())
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 6)
@@ -236,7 +264,12 @@ private struct OptionalCommentActions: ViewModifier {
 
 /// Tabs expanded so indentation lines up.
 private func displayText(_ line: DiffLine) -> String {
-    line.text.replacingOccurrences(of: "\t", with: "    ")
+    SyntaxHighlighter.displayText(line.text)
+}
+
+/// The line with syntax colors when its language is known; plain otherwise.
+private func coloredText(_ line: DiffLine, tokens: [SyntaxToken]?) -> AttributedString {
+    SyntaxColors.attributed(displayText(line), tokens: tokens ?? [])
 }
 
 extension DiffLine.Kind {

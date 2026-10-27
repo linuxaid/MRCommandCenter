@@ -15,6 +15,13 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var lastDiscussionRequest: NewDiffDiscussionRequest?
         var lastGeneralBody: String?
         var mergeFailure: APIError?
+        var rawFileFailure: APIError?
+        var labelFailure: APIError?
+        var resolveFailure: APIError?
+        var discussionsFailure: APIError?
+        /// Holds a label update's reply for a while (by label name), to deliver replies out of order.
+        var labelReplyDelays: [String: Duration] = [:]
+        var rawFileOverride: Data?
         /// Fails merges of just these MRs (by iid), on top of `mergeFailure`.
         var mergeFailuresByIID: [Int: APIError] = [:]
         var merges: [MergeOptions] = []
@@ -51,6 +58,33 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         record("authoredList")
         if let failure = state.withLock({ $0.listFailure }) { throw failure }
         return try await mock.openMergeRequests(authorID: authorID)
+    }
+
+    func setDiscussionResolved(projectID: Int, iid: Int, discussionID: String, resolved: Bool) async throws -> GitLabDiscussion {
+        record("resolve")
+        if let failure = state.withLock({ $0.resolveFailure }) { throw failure }
+        let client = mock
+        let discussion = try await client.setDiscussionResolved(projectID: projectID, iid: iid, discussionID: discussionID, resolved: resolved)
+        edit { $0.data = client.data }
+        return discussion
+    }
+
+    func projectLabels(projectID: Int) async throws -> [GitLabLabel] {
+        record("projectLabels")
+        if let failure = state.withLock({ $0.labelFailure }) { throw failure }
+        return try await mock.projectLabels(projectID: projectID)
+    }
+
+    func updateLabels(projectID: Int, iid: Int, add: [String], remove: [String]) async throws -> GitLabMergeRequest {
+        record("updateLabels")
+        if let failure = state.withLock({ $0.labelFailure }) { throw failure }
+        let client = mock
+        let updated = try await client.updateLabels(projectID: projectID, iid: iid, add: add, remove: remove)
+        edit { $0.data = client.data }
+        if let delay = state.withLock({ state in (add + remove).compactMap { state.labelReplyDelays[$0] }.first }) {
+            try await Task.sleep(for: delay)
+        }
+        return updated
     }
 
     func approve(projectID: Int, iid: Int, sha: String) async throws -> GitLabApprovals {
@@ -94,6 +128,7 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
 
     func discussions(projectID: Int, iid: Int) async throws -> [GitLabDiscussion] {
         record("discussions")
+        if let failure = state.withLock({ $0.discussionsFailure }) { throw failure }
         return try await mock.discussions(projectID: projectID, iid: iid)
     }
 
@@ -105,6 +140,14 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
     func fileContent(projectID: Int, path: String, ref: String) async throws -> String {
         record("fileContent")
         return try await mock.fileContent(projectID: projectID, path: path, ref: ref)
+    }
+
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
+        record("rawFile")
+        let (failure, override) = state.withLock { ($0.rawFileFailure, $0.rawFileOverride) }
+        if let failure { throw failure }
+        if let override { return override }
+        return try await mock.rawFile(projectID: projectID, path: path, ref: ref)
     }
 
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {

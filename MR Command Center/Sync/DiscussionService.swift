@@ -8,6 +8,7 @@ enum CommentPostingError: LocalizedError, Equatable {
     case missingDiffRefs
     case needsAPIScope
     case alreadyPosted
+    case resolveNeedsAPIScope
 
     var errorDescription: String? {
         switch self {
@@ -21,6 +22,8 @@ enum CommentPostingError: LocalizedError, Equatable {
             "GitLab refused the comment (403). Posting needs a token with the api scope, not just read_api."
         case .alreadyPosted:
             "This AI comment was already posted to GitLab."
+        case .resolveNeedsAPIScope:
+            "GitLab refused (403). Resolving threads needs a token with the api scope and permission in this project."
         }
     }
 }
@@ -113,6 +116,54 @@ final class DiscussionService {
         }
         Log.sync.info("Posted a reply")
         return note
+    }
+
+    /// Records something you did in Activity without marking the MR as having news. Set by `AppModel`.
+    var recordOwnActivity: ((ActivityDetector.Change, TrackedMR) -> Void)?
+    /// Refetches the MR (status, approvals, threads) and logs what changed. Set by `AppModel`.
+    var refreshMergeRequest: ((TrackedMR) async -> Void)?
+
+    /// Resolves (or reopens) a thread so the MR can merge, and records it in Activity.
+    /// Not gated by "Allow posting comments": like Approve and Merge, it only needs the api scope.
+    func setResolved(_ discussionID: String, resolved: Bool, mr: TrackedMR) async throws {
+        let before = MRSnapshot(mr)
+        let updated: GitLabDiscussion
+        do {
+            updated = try await client().setDiscussionResolved(projectID: mr.projectID, iid: mr.iid,
+                                                               discussionID: discussionID, resolved: resolved)
+        } catch APIError.forbidden {
+            throw CommentPostingError.resolveNeedsAPIScope
+        }
+        var patched = cache[mr.key]?.discussions ?? []
+        if let index = patched.firstIndex(where: { $0.id == discussionID }) {
+            patched[index] = updated
+            cache[mr.key] = (cache[mr.key]?.fetchedAt ?? .now, patched)
+        }
+
+        // Refetch the MR so GitLab's merge status (and with it, readiness) follows the threads,
+        // and the refresh logs what this unblocked ("All threads resolved", "Ready to merge").
+        await refreshMergeRequest?(mr)
+        let refreshed = refreshMergeRequest != nil && mr.detailsError == nil
+        // Recount from a fresh fetch: the cache may predate threads that arrived since. If that
+        // fails, use the patched cache, which may be a little stale but has this change.
+        if (try? await discussions(for: mr, forceRefresh: true)) == nil, cache[mr.key] != nil {
+            updateCounts(for: mr, with: patched)
+        }
+        if !refreshed {
+            for change in ActivityDetector.changes(from: before, to: MRSnapshot(mr)) {
+                recordOwnActivity?(change, mr)
+            }
+        }
+
+        let me = AccountSettings.current(in: context).gitLabUsername
+        let starter = updated.userNotes.first?.author
+        let firstName = starter?.name.split(separator: " ").first.map(String.init) ?? ""
+        let whose = if let starter, let me, starter.username == me { "your thread" }
+            else if !firstName.isEmpty { "\(firstName)'s thread" }
+            else { "a thread" }
+        recordOwnActivity?(ActivityDetector.Change(kind: .other, message: "You \(resolved ? "resolved" : "reopened") \(whose)"), mr)
+        try? context.save()
+        Log.sync.info("Changed a thread's resolved state")
     }
 
     private func validated(_ body: String) throws -> String {
