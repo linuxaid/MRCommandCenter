@@ -40,11 +40,11 @@ struct ImagePreviewView: View {
 
     private func panels(_ sides: [ImagePreview.Side]) -> some View {
         ForEach(sides) { side in
-            ImageSidePanel(mr: mr, side: side, title: title(for: side, count: sides.count))
+            ImageSidePanel(mr: mr, side: side, title: title(for: side), openInBrowser: openInBrowser)
         }
     }
 
-    private func title(for side: ImagePreview.Side, count: Int) -> String {
+    private func title(for side: ImagePreview.Side) -> String {
         switch (side.kind, file.change) {
         case (.after, .added): "New image"
         case (.before, .deleted): "Deleted image"
@@ -58,22 +58,18 @@ private struct ImageSidePanel: View {
     let mr: TrackedMR
     let side: ImagePreview.Side
     let title: String
+    let openInBrowser: () -> Void
     @Environment(AppModel.self) private var appModel
-    @State private var state: LoadState = .loading
-
-    private enum LoadState {
-        case loading
-        case loaded(NSImage, String)
-        case failed(String)
-    }
+    @State private var loaded: ImagePreview.Loaded?
+    @State private var attempt = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).font(.headline)
                 Spacer()
-                if case .loaded(_, let size) = state {
-                    Text(size)
+                if case .image(_, _, let sizeText) = loaded {
+                    Text(sizeText)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -86,43 +82,42 @@ private struct ImageSidePanel: View {
                 .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(.separator) }
         }
         .frame(maxWidth: 520, alignment: .leading)
-        .task(id: side.id) { await load() }
+        .task(id: "\(side.id)#\(attempt)") {
+            loaded = nil
+            let result = await appModel.diffs.imagePreview(for: mr, side: side)
+            if case .cancelled = result { return }
+            loaded = result
+        }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch state {
-        case .loading:
+        switch loaded {
+        case nil, .cancelled?:
             ProgressView().frame(maxWidth: .infinity, minHeight: 160)
-        case .loaded(let image, _):
-            // Shrinks to fit, but never enlarges small images (icons stay crisp at their real size).
+        case .image(let image, let pixels, _)?:
+            // Shrinks to fit, but never enlarges past the image's real pixel size, so icons stay crisp.
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
                 .scaledToFit()
-                .frame(maxWidth: image.size.width, maxHeight: image.size.height)
+                .frame(maxWidth: CGFloat(pixels?.width ?? Int(image.size.width)),
+                       maxHeight: CGFloat(pixels?.height ?? Int(image.size.height)))
                 .accessibilityLabel("\(title), \(side.path)")
-        case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle")
-                .font(.callout)
-                .foregroundStyle(.orange)
-                .padding(16)
-                .frame(maxWidth: .infinity, minHeight: 160)
-        }
-    }
-
-    private func load() async {
-        do {
-            let data = try await appModel.diffs.imageData(for: mr, side: side)
-            guard let image = NSImage(data: data) else {
-                state = .failed("Couldn't read this image (\(ImagePreview.sizeDescription(byteCount: data.count, pixelSize: nil))).")
-                return
+        case .failed(let message)?:
+            VStack(spacing: 10) {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                HStack {
+                    Button("Try Again") { attempt += 1 }
+                    Button("Open in Browser", action: openInBrowser)
+                }
+                .controlSize(.small)
             }
-            state = .loaded(image, ImagePreview.sizeDescription(byteCount: data.count, pixelSize: ImagePreview.pixelSize(of: data)))
-        } catch is CancellationError {
-            return
-        } catch {
-            state = .failed("Couldn't load the image: \(error.localizedDescription)")
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 160)
         }
     }
 }

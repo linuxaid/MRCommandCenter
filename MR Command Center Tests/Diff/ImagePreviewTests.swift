@@ -78,4 +78,66 @@ struct ImagePreviewTests {
         #expect(ImagePreview.pixelSize(of: data)?.width == MockImages.size.width)
         #expect(spy.count("rawFile") == 1, "Same commit and path come from the cache")
     }
+
+    private func cartsImage() async throws -> (AppModel, SpyGitLabClient, TrackedMR, ImagePreview.Side) {
+        let spy = SpyGitLabClient()
+        let app = AppModel.testing(gitLab: spy)
+        await app.mergeRequests.refresh(.automatic)
+        let carts = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 1873 })
+        let diff = try await app.diffs.diff(for: carts)
+        let png = try #require(diff.files.first { $0.path.hasSuffix(".png") })
+        let sides = ImagePreview.sides(for: png, headSHA: diff.headSHA, baseSHA: diff.refs?.baseSHA)
+        return (app, spy, carts, try #require(sides.first))
+    }
+
+    @Test func loadsAnImageWithItsSize() async throws {
+        let (app, _, carts, side) = try await cartsImage()
+        guard case .image(_, let pixels, let text) = await app.diffs.imagePreview(for: carts, side: side) else {
+            Issue.record("Expected an image"); return
+        }
+        #expect(pixels?.width == MockImages.size.width)
+        #expect(text.hasPrefix("\(MockImages.size.width) × \(MockImages.size.height) px"))
+    }
+
+    @Test func missingFileSaysSoInsteadOfBlamingTheURL() async throws {
+        let (app, spy, carts, side) = try await cartsImage()
+        spy.edit { $0.rawFileFailure = .notFound }
+        guard case .failed(let message) = await app.diffs.imagePreview(for: carts, side: side) else {
+            Issue.record("Expected a failure"); return
+        }
+        #expect(message.contains("isn't in the repository at \(side.ref.prefix(8))"))
+        #expect(!message.contains("base URL"))
+    }
+
+    @Test func undecodableDataIsReported() async throws {
+        let (app, spy, carts, side) = try await cartsImage()
+        spy.edit { $0.rawFileOverride = Data("not an image".utf8) }
+        guard case .failed(let message) = await app.diffs.imagePreview(for: carts, side: side) else {
+            Issue.record("Expected a failure"); return
+        }
+        #expect(message.contains("isn't an image macOS can read"))
+    }
+
+    @Test func failuresAreNotCached() async throws {
+        let (app, spy, carts, side) = try await cartsImage()
+        spy.edit { $0.rawFileFailure = .offline }
+        _ = await app.diffs.imagePreview(for: carts, side: side)
+        spy.edit { $0.rawFileFailure = nil }
+
+        guard case .image = await app.diffs.imagePreview(for: carts, side: side) else {
+            Issue.record("Trying again should load the image"); return
+        }
+        #expect(spy.count("rawFile") == 2)
+    }
+
+    @Test func cacheKeepsOnlyTheMostRecentImages() async throws {
+        let (app, spy, carts, side) = try await cartsImage()
+        for index in 0...DiffService.imageCacheLimit {
+            let other = ImagePreview.Side(kind: .after, path: side.path, ref: "ref\(index)")
+            _ = try await app.diffs.imageData(for: carts, side: other)
+        }
+        let before = spy.count("rawFile")
+        _ = try await app.diffs.imageData(for: carts, side: .init(kind: .after, path: side.path, ref: "ref0"))
+        #expect(spy.count("rawFile") == before + 1, "The oldest entry was dropped")
+    }
 }

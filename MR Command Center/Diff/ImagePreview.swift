@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import ImageIO
 
 /// Decides whether a binary file can be previewed as an image, which versions to show,
@@ -35,6 +35,13 @@ nonisolated enum ImagePreview {
         case .deleted: [before].compactMap { $0 }
         case .modified, .renamed: [before, after].compactMap { $0 }
         }
+    }
+
+    /// The outcome of loading one side of a preview.
+    enum Loaded {
+        case image(NSImage, pixels: (width: Int, height: Int)?, sizeText: String)
+        case failed(String)
+        case cancelled
     }
 
     /// Width and height in pixels, or nil if the data isn't an image macOS can read.
