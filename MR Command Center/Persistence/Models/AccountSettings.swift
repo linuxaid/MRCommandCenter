@@ -81,6 +81,12 @@ final class AccountSettings {
 }
 
 extension AccountSettings {
+    /// The issue's page in Jira, or nil when no valid Jira URL is set.
+    func jiraBrowseURL(for key: String) -> URL? {
+        guard let base = try? BaseURL.normalize(jiraBaseURL, strippingSuffixes: BaseURL.jiraSuffixes) else { return nil }
+        return base.appending(path: "browse").appending(path: key)
+    }
+
     /// Returns the settings row, creating it on first launch.
     static func current(in context: ModelContext) -> AccountSettings {
         var descriptor = FetchDescriptor<AccountSettings>()
