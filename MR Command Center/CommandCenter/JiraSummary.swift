@@ -60,7 +60,8 @@ struct JiraSummary: Equatable {
 
     static func found(_ details: JiraIssueDetails, passing: Bool) -> JiraSummary {
         let rows = [
-            Row(label: "Status", value: details.status, tone: passing ? .positive : .normal),
+            // Not in a passing status (e.g. still To Do): a warning, as everywhere else in the app.
+            Row(label: "Status", value: details.status, tone: passing ? .positive : .warning),
             Row(label: "Type", value: nonEmpty(details.issueType) ?? "Not set"),
             details.hasPriority
                 ? Row(label: "Priority", value: details.priority ?? "")
@@ -70,7 +71,10 @@ struct JiraSummary: Equatable {
             Row(label: "Assignee", value: nonEmpty(details.assignee) ?? "Unassigned"),
         ]
         return JiraSummary(state: .found, key: details.key, title: nonEmpty(details.summary), rows: rows,
-                           description: nonEmpty(details.description), acceptanceCriteria: nonEmpty(details.acceptanceCriteria))
+                           description: nonEmpty(details.description),
+                           // Criteria pulled out of the description are already in it; don't show them twice.
+                           acceptanceCriteria: details.acceptanceCriteriaSource == .description && nonEmpty(details.description) != nil
+                               ? nil : nonEmpty(details.acceptanceCriteria))
     }
 
     private static func nonEmpty(_ text: String?) -> String? {

@@ -41,6 +41,16 @@ struct JiraSummaryTests {
         #expect(pay142.acceptanceCriteria != nil)
     }
 
+    @Test func criteriaFromTheDescriptionArentRepeated() {
+        var details = JiraIssueDetails(issue: MockJiraData.issues["PAY-142"]!, acceptanceCriteriaFieldID: "", priorityFieldID: "")
+        details.description = "Story.\n\n## Acceptance criteria\n- Retries"
+        details.acceptanceCriteria = "- Retries"
+        details.acceptanceCriteriaSource = .description
+        #expect(JiraSummary.found(details, passing: true).acceptanceCriteria == nil)
+        details.acceptanceCriteriaSource = .customField
+        #expect(JiraSummary.found(details, passing: true).acceptanceCriteria == "- Retries")
+    }
+
     @Test func criteriaAloneCanBeExpanded() {
         var details = JiraIssueDetails(issue: MockJiraData.issues["PAY-142"]!, acceptanceCriteriaFieldID: "", priorityFieldID: "")
         details.description = "  "
@@ -98,7 +108,7 @@ struct JiraSummaryTests {
         let summary = JiraSummary.found(details, passing: false)
         #expect(summary.rows.first { $0.label == "Fix version" }?.value == "None")
         #expect(summary.rows.first { $0.label == "Assignee" }?.value == "Unassigned")
-        #expect(summary.rows.first { $0.label == "Status" }?.tone == .normal)
+        #expect(summary.rows.first { $0.label == "Status" }?.tone == .warning, "Not a passing status")
     }
 
     @Test func severalFixVersionsAreListed() {

@@ -521,6 +521,9 @@ private struct ContextCard: View {
             Text("AI REVIEW").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
                 .padding(.top, 8)
             aiLine
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .card()
         }
     }
 
@@ -563,7 +566,8 @@ private struct ContextCard: View {
                     Spacer(minLength: 0)
                 }
                 .font(.callout)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilityText(row))
             }
         }
         if let error = summary.staleError {
@@ -596,6 +600,15 @@ private struct ContextCard: View {
                     .font(.callout.weight(.medium))
                     .foregroundStyle(Theme.inkSecondary)
             }
+        }
+    }
+
+    private func accessibilityText(_ row: JiraSummary.Row) -> String {
+        switch (row.label, row.tone) {
+        case ("Status", .positive): "Status: \(row.value), passing"
+        case ("Status", .warning): "Status: \(row.value), not a passing status"
+        case (_, .warning): "\(row.label): \(row.value), needs attention"
+        default: "\(row.label): \(row.value)"
         }
     }
 
