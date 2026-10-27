@@ -269,18 +269,19 @@ struct TriageRow: View {
                     .frame(maxWidth: 360)
                     .padding(.top, 3)
             }
-            // Always takes its space, so selecting a row doesn't shift its text.
+        }
+        .padding(.vertical, 12)
+        .padding(.leading, style.contentLeadingInset)
+        // Room for the chevron in every state, so selecting a row doesn't shift its text.
+        .padding(.trailing, 30)
+        .overlay(alignment: .trailing) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(selectionColor)
-                .frame(width: 14)
-                .frame(maxHeight: .infinity)
+                .padding(.trailing, 12)
                 .opacity(style.showsMarker ? 1 : 0)
                 .accessibilityHidden(true)
         }
-        .padding(.vertical, 12)
-        .padding(.leading, 14 + style.accentBarWidth - CardSelectionStyle.unselected.accentBarWidth)
-        .padding(.trailing, 10)
         .overlay(alignment: .leading) {
             UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10)
                 .fill(isSelected ? selectionColor : tint)

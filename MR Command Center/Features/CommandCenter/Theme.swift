@@ -127,6 +127,15 @@ nonisolated enum Contrast {
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
+    /// `top` at `opacity` over `bottom`, per channel.
+    static func blend(_ top: UInt32, over bottom: UInt32, opacity: Double) -> UInt32 {
+        func channel(_ shift: UInt32) -> UInt32 {
+            let t = Double((top >> shift) & 0xFF), b = Double((bottom >> shift) & 0xFF)
+            return UInt32((t * opacity + b * (1 - opacity)).rounded()) << shift
+        }
+        return channel(16) | channel(8) | channel(0)
+    }
+
     static func luminance(_ hex: UInt32) -> Double {
         func channel(_ value: UInt32) -> Double {
             let c = Double(value) / 255
@@ -147,22 +156,35 @@ struct CardSelectionStyle: Equatable {
     let showsMarker: Bool
     let shadowRadius: CGFloat
     let shadowOpacity: Double
+    /// Where the row's content starts. The same in both states, sized for the widest bar,
+    /// so selecting a row never shifts its text.
+    let contentLeadingInset: CGFloat
 
     static let unselected = CardSelectionStyle(borderWidth: 1, tintOpacity: 0, accentBarWidth: 4, showsMarker: false,
-                                               shadowRadius: 2, shadowOpacity: 0.03)
+                                               shadowRadius: 2, shadowOpacity: 0.03, contentLeadingInset: 17)
     static let selected = CardSelectionStyle(borderWidth: 2.5, tintOpacity: 0.08, accentBarWidth: 7, showsMarker: true,
-                                             shadowRadius: 8, shadowOpacity: 0.12)
+                                             shadowRadius: 8, shadowOpacity: 0.12, contentLeadingInset: 17)
+    /// "This is on", not "this is selected" (the Merge Rules switches): a light accent border only.
+    static let highlighted = CardSelectionStyle(borderWidth: 1.5, tintOpacity: 0, accentBarWidth: 4, showsMarker: false,
+                                                shadowRadius: 4, shadowOpacity: 0.06, contentLeadingInset: 17)
 
     static func style(isSelected: Bool) -> CardSelectionStyle { isSelected ? .selected : .unselected }
+
+    /// The tinted card under a selected border, for contrast checks.
+    static func tintedSurface(_ lane: UInt32) -> UInt32 {
+        Contrast.blend(lane, over: Theme.Hex.surface, opacity: selected.tintOpacity)
+    }
 }
 
 /// A white card on the canvas with a hairline edge; selected cards get a tint and a strong border.
 struct CardBackground: ViewModifier {
     var isSelected = false
+    var isHighlighted = false
     var accent: Color = Theme.ink
 
     func body(content: Content) -> some View {
-        let style = CardSelectionStyle.style(isSelected: isSelected)
+        let style = isSelected ? CardSelectionStyle.selected : isHighlighted ? .highlighted : .unselected
+        let isAccented = isSelected || isHighlighted
         content
             .background {
                 RoundedRectangle(cornerRadius: 10)
@@ -171,15 +193,16 @@ struct CardBackground: ViewModifier {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isSelected ? accent : Theme.hairline, lineWidth: style.borderWidth)
+                    .strokeBorder(isAccented ? accent : Theme.hairline, lineWidth: style.borderWidth)
             }
             .shadow(color: .black.opacity(style.shadowOpacity), radius: style.shadowRadius, y: 1)
     }
 }
 
 extension View {
-    func card(isSelected: Bool = false, accent: Color = Theme.ink) -> some View {
-        modifier(CardBackground(isSelected: isSelected, accent: accent))
+    /// `isSelected`: the strong selected look. `isHighlighted`: a light accent border for "on" states.
+    func card(isSelected: Bool = false, isHighlighted: Bool = false, accent: Color = Theme.ink) -> some View {
+        modifier(CardBackground(isSelected: isSelected, isHighlighted: isHighlighted, accent: accent))
     }
 }
 
