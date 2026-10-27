@@ -25,19 +25,20 @@ struct UnifiedDiffView: View {
                 }
                 .textSelection(.enabled)
             }
-            .onAppear { scroll(proxy) }
-            .onChange(of: scrollRequest?.id) { scroll(proxy) }
+            .onAppear { scroll(proxy, animated: false) }
+            .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
     }
 
-    private func scroll(_ proxy: ScrollViewProxy) {
+    /// Opening a file at a line lands there directly; a new target in an open file animates.
+    private func scroll(_ proxy: ScrollViewProxy, animated: Bool) {
         guard let request = scrollRequest,
               let target = file.hunks.lazy.flatMap(\.lines).first(where: { $0.kind != .deletion && $0.newNumber == request.line })
         else { return }
         Task {
-            withAnimation { proxy.scrollTo(target.id, anchor: .center) }
+            withAnimation(animated ? .default : nil) { proxy.scrollTo(target.id, anchor: .center) }
             await flash(target.id)
         }
     }
@@ -82,19 +83,20 @@ struct SideBySideDiffView: View {
             }
             .textSelection(.enabled)
         }
-        .onAppear { scroll(proxy) }
-        .onChange(of: scrollRequest?.id) { scroll(proxy) }
+        .onAppear { scroll(proxy, animated: false) }
+        .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
     }
 
-    private func scroll(_ proxy: ScrollViewProxy) {
+    /// Opening a file at a line lands there directly; a new target in an open file animates.
+    private func scroll(_ proxy: ScrollViewProxy, animated: Bool) {
         guard let request = scrollRequest else { return }
         let rows = file.hunks.flatMap(SideBySide.rows(for:))
         guard let target = rows.first(where: { $0.right?.newNumber == request.line }) else { return }
         Task {
-            withAnimation { proxy.scrollTo(target.id, anchor: .center) }
+            withAnimation(animated ? .default : nil) { proxy.scrollTo(target.id, anchor: .center) }
             highlighted = target.id
             try? await Task.sleep(for: .seconds(2))
             if highlighted == target.id { withAnimation { highlighted = nil } }
