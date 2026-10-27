@@ -322,7 +322,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "MR Command Center";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 26.10.27;
 				PRODUCT_BUNDLE_IDENTIFIER = com.weinnotes.MRCommandCenter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -352,7 +352,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "MR Command Center";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 26.10.27;
 				PRODUCT_BUNDLE_IDENTIFIER = com.weinnotes.MRCommandCenter;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -372,7 +372,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3BR8562V2D;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 26.10.27;
 				PRODUCT_BUNDLE_IDENTIFIER = com.weinnotes.MRCommandCenterTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -393,7 +393,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3BR8562V2D;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 26.10.27;
 				PRODUCT_BUNDLE_IDENTIFIER = com.weinnotes.MRCommandCenterTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
