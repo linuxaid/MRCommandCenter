@@ -128,6 +128,12 @@ struct ChangesView: View {
             .focusable()
             .focusEffectDisabled()
             .focused($isFocused)
+            // I opens the label picker (#27). On the diff itself, so typing in a comment box isn't caught.
+            .onKeyPress(characters: CharacterSet(charactersIn: "iI")) { press in
+                guard press.modifiers.isDisjoint(with: [.command, .option, .control]), comments.activeTarget == nil else { return .ignored }
+                appModel.commandCenter.editLabels(mr)
+                return .handled
+            }
             .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                 let handled = model.handleArrow(
                     by: press.key == .downArrow ? 1 : -1,

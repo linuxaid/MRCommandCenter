@@ -42,23 +42,50 @@ final class LabelEditor {
         return matching.filter { applied.contains($0.name) } + matching.filter { !applied.contains($0.name) }
     }
 
+    static let closedMessage = "This merge request is no longer open."
+
+    /// Shows the labels from last time right away, then the fresh list from GitLab.
     func load() async {
-        guard let mr else { return }
-        phase = .loading
+        guard let mr else {
+            phase = .failed(Self.closedMessage)
+            return
+        }
+        if let cached = service.cachedProjectLabels(for: mr) {
+            available = cached
+            phase = .loaded
+        } else {
+            phase = .loading
+        }
         do {
             available = try await service.projectLabels(for: mr)
             phase = .loaded
         } catch {
-            phase = .failed(CommandCenter.describeActionFailure(error))
+            if available.isEmpty {
+                phase = .failed(CommandCenter.describeLabelFailure(error, changing: false))
+            } else {
+                self.error = CommandCenter.describeLabelFailure(error, changing: false)
+            }
         }
     }
 
     /// Adds the label if the MR doesn't have it, removes it if it does.
     func toggle(_ name: String) async {
-        guard let mr, !busy.contains(name) else { return }
+        guard let mr else {
+            error = Self.closedMessage
+            return
+        }
+        guard !busy.contains(name) else { return }
         busy.insert(name)
         defer { busy.remove(name) }
         let adding = !mr.labels.contains(name)
         error = await service.setLabel(name, on: mr, applied: adding)
+    }
+
+    /// Return in the search field: adds the best match. It never removes, so a stray Return
+    /// can't take a label off, and does nothing until something is typed.
+    func submit() async {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty,
+              let match = visible.first(where: { !applied.contains($0.name) }) else { return }
+        await toggle(match.name)
     }
 }

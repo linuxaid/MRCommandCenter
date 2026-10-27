@@ -45,12 +45,6 @@ struct ReviewMode: View {
             .animation(.default, value: appModel.isInspectorPresented)
         }
         .background(Theme.canvas)
-        // I opens the label picker; typing "i" in a comment box goes to the text field instead.
-        .onKeyPress(characters: CharacterSet(charactersIn: "iI")) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
-            appModel.commandCenter.editLabels(mr)
-            return .handled
-        }
         .sheet(item: Bindable(appModel.summaryPoster).draft) { _ in
             SummaryPreviewSheet(poster: appModel.summaryPoster)
         }

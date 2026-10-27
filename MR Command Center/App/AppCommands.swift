@@ -49,7 +49,7 @@ struct AppCommands: Commands {
             .disabled(store.selected == nil || store.selected?.isAuthor == true)
 
             // No key equivalent: a bare "I" menu shortcut would swallow typing. I works in the list and review.
-            Button("Labels… (I)") {
+            Button("Labels…") {
                 guard let mr = store.selected else { return }
                 center.editLabels(mr)
             }

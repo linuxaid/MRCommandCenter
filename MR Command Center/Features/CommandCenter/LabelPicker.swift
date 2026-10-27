@@ -20,10 +20,8 @@ struct LabelPicker: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($searchFocused)
                 .onSubmit {
-                    // Return toggles the top match, so a label can be added without the mouse.
-                    if let first = editor.visible.first {
-                        Task { await editor.toggle(first.name) }
-                    }
+                    // Return adds the best match, so a label can be added without the mouse.
+                    Task { await editor.submit() }
                 }
             content
             if let error = editor.error {
@@ -33,12 +31,13 @@ struct LabelPicker: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Text("Click a label to add or remove it.")
+                Text("Click a label to add or remove it. Return adds the top match.")
                     .font(.caption)
                     .foregroundStyle(Theme.inkTertiary)
                 Spacer()
+                // Esc, not Return: Return belongs to the search field.
                 Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.cancelAction)
             }
         }
         .padding(20)

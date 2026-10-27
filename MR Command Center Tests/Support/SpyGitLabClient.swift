@@ -17,6 +17,8 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var mergeFailure: APIError?
         var rawFileFailure: APIError?
         var labelFailure: APIError?
+        /// Holds a label update's reply for a while (by label name), to deliver replies out of order.
+        var labelReplyDelays: [String: Duration] = [:]
         var rawFileOverride: Data?
         /// Fails merges of just these MRs (by iid), on top of `mergeFailure`.
         var mergeFailuresByIID: [Int: APIError] = [:]
@@ -68,6 +70,9 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         let client = mock
         let updated = try await client.updateLabels(projectID: projectID, iid: iid, add: add, remove: remove)
         edit { $0.data = client.data }
+        if let delay = state.withLock({ state in (add + remove).compactMap { state.labelReplyDelays[$0] }.first }) {
+            try await Task.sleep(for: delay)
+        }
         return updated
     }
 
