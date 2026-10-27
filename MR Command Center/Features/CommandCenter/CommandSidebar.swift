@@ -103,6 +103,13 @@ private struct RefreshStatus: View {
                 Text("Not refreshed yet")
             }
             Spacer()
+            if let version = AppVersion.current {
+                Text(version)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.inkTertiary)
+                    .help("MR Command Center \(version)")
+                    .accessibilityLabel("Version \(version)")
+            }
         }
         .font(.caption)
         .foregroundStyle(Theme.inkSecondary)

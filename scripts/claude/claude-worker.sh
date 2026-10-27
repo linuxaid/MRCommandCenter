@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs the work-issues skill headless, one issue per pass, for up to
-# CLAUDE_WORKER_MAX_ISSUES passes. Meant to be started by launchd.
+# Runs the work-issues skill headless: one pass that works up to CLAUDE_WORKER_MAX_ISSUES
+# issues into today's release (tag and app version yy.m.d). One release per day, so once
+# today's release exists, later runs exit straight away. Meant to be started by launchd.
 #
 # Runs in a DEDICATED clone (not the copy you edit by hand), so Claude never
 # trips over your uncommitted work. Set CLAUDE_WORKER_REPO to override.
@@ -9,8 +10,9 @@ set -uo pipefail
 REPO_DIR="${CLAUDE_WORKER_REPO:-$HOME/claude-worker/MRCommandCenter}"
 LOG_DIR="$HOME/Library/Logs/mrcc-claude-worker"
 LOCK_DIR="/tmp/mrcc-claude-worker.lock"
-MAX_BUDGET_USD="${CLAUDE_WORKER_MAX_BUDGET_USD:-10}"
-MAX_ISSUES="${CLAUDE_WORKER_MAX_ISSUES:-3}"
+MAX_ISSUES="${CLAUDE_WORKER_MAX_ISSUES:-5}"
+# Per run, so it scales with the number of issues a release can hold.
+MAX_BUDGET_USD="${CLAUDE_WORKER_MAX_BUDGET_USD:-$((10 * MAX_ISSUES))}"
 
 # Issues labeled `claude` with none of the state labels.
 eligible_count() {
@@ -25,7 +27,7 @@ main() {
   LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d_%H%M%S).log"
   exec >>"$LOG_FILE" 2>&1
 
-  echo "=== $(date) starting worker in $REPO_DIR (up to $MAX_ISSUES issues) ==="
+  echo "=== $(date) starting worker in $REPO_DIR (up to $MAX_ISSUES issues in today's release) ==="
 
   # Only one run at a time.
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -37,37 +39,24 @@ main() {
   cd "$REPO_DIR" || { echo "Repo not found at $REPO_DIR"; exit 1; }
 
   STATUS=0
-  for ((pass = 1; pass <= MAX_ISSUES; pass++)); do
-    # Cheap check first so an empty queue costs nothing.
-    BEFORE=$(eligible_count)
-    if [ "${BEFORE:-0}" = "0" ]; then
-      echo "No eligible issues."
-      break
-    fi
-    echo "--- pass $pass of $MAX_ISSUES: $BEFORE eligible issue(s) ---"
-
+  # Cheap checks first, so a day that's already released or an empty queue costs nothing.
+  VERSION=$(bash scripts/claude/release-version.sh)
+  ELIGIBLE=$(eligible_count)
+  if gh release view "$VERSION" >/dev/null 2>&1; then
+    echo "Already released today ($VERSION)."
+  elif [ "${ELIGIBLE:-0}" = "0" ]; then
+    echo "No eligible issues."
+  else
+    echo "--- $ELIGIBLE eligible issue(s); building release $VERSION ---"
     # dontAsk: anything not covered by .claude/settings.json allow rules is denied, never prompted.
-    # `once`: one issue per pass, so CLAUDE_WORKER_MAX_ISSUES caps the run.
-    claude -p "/work-issues once" \
+    claude -p "/work-issues $MAX_ISSUES" \
       --permission-mode dontAsk \
       --permission-prompts none \
       --max-budget-usd "$MAX_BUDGET_USD" \
       --output-format json
     STATUS=$?
-    echo "--- pass $pass finished with exit code $STATUS ---"
-    if [ "$STATUS" != "0" ]; then
-      echo "Stopping after a failed pass."
-      break
-    fi
-
-    # Every finished pass labels its issue, so the queue shrinks. If it didn't
-    # (for example the tree wasn't clean), another pass would just repeat it.
-    AFTER=$(eligible_count)
-    if [ "${AFTER:-0}" -ge "${BEFORE:-0}" ]; then
-      echo "Queue didn't shrink ($BEFORE -> $AFTER); stopping."
-      break
-    fi
-  done
+    echo "--- finished with exit code $STATUS ---"
+  fi
 
   echo "=== $(date) finished with exit code $STATUS ==="
 
