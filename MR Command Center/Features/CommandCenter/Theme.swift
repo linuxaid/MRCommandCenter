@@ -3,31 +3,59 @@ import SwiftUI
 /// The command center's look: warm paper, dark ink, one signal color per lane.
 /// The app always runs in light appearance (see `MRCommandCenterApp`), so these are light-only.
 enum Theme {
-    static let canvas = Color(hex: 0xF6F3EC)
-    static let surface = Color.white
+    /// The raw values, so contrast can be checked in tests.
+    enum Hex {
+        static let canvas: UInt32 = 0xF6F3EC
+        static let surface: UInt32 = 0xFFFFFF
+        static let inkSecondary: UInt32 = 0x6A6358
+        static let inkTertiary: UInt32 = 0x9C9486
+        static let yourMove: UInt32 = 0xD9480F
+        static let ready: UInt32 = 0x2B8A3E
+        static let autoMerge: UInt32 = 0x6741D9
+        static let inFlight: UInt32 = 0x1C6DD0
+        static let draft: UInt32 = 0x868E96
+
+        static func lane(_ lane: Lane) -> UInt32 {
+            switch lane {
+            case .yourMove: yourMove
+            case .readyToMerge: ready
+            case .autoMerge: autoMerge
+            case .inFlight: inFlight
+            case .drafts: draft
+            case .setAside: inkTertiary
+            }
+        }
+
+        /// The selected row's border and marker: the lane color when it stands out against the
+        /// canvas (WCAG 3:1 for UI parts), otherwise the darker secondary ink.
+        static func selection(_ lane: Lane) -> UInt32 {
+            let color = Self.lane(lane)
+            return Contrast.ratio(color, canvas) >= 3 ? color : inkSecondary
+        }
+    }
+
+    static let canvas = Color(hex: Hex.canvas)
+    static let surface = Color(hex: Hex.surface)
     static let sunken = Color(hex: 0xEEE9DF)
     static let hairline = Color(hex: 0xE2DCCF)
     static let ink = Color(hex: 0x1E1C18)
-    static let inkSecondary = Color(hex: 0x6A6358)
-    static let inkTertiary = Color(hex: 0x9C9486)
+    static let inkSecondary = Color(hex: Hex.inkSecondary)
+    static let inkTertiary = Color(hex: Hex.inkTertiary)
 
-    static let yourMove = Color(hex: 0xD9480F)
-    static let ready = Color(hex: 0x2B8A3E)
-    static let autoMerge = Color(hex: 0x6741D9)
-    static let inFlight = Color(hex: 0x1C6DD0)
-    static let draft = Color(hex: 0x868E96)
+    static let yourMove = Color(hex: Hex.yourMove)
+    static let ready = Color(hex: Hex.ready)
+    static let autoMerge = Color(hex: Hex.autoMerge)
+    static let inFlight = Color(hex: Hex.inFlight)
+    static let draft = Color(hex: Hex.draft)
     static let danger = Color(hex: 0xC92A2A)
     static let caution = Color(hex: 0xD98200)
 
     static func color(for lane: Lane) -> Color {
-        switch lane {
-        case .yourMove: yourMove
-        case .readyToMerge: ready
-        case .autoMerge: autoMerge
-        case .inFlight: inFlight
-        case .drafts: draft
-        case .setAside: inkTertiary
-        }
+        Color(hex: Hex.lane(lane))
+    }
+
+    static func selectionColor(for lane: Lane) -> Color {
+        Color(hex: Hex.selection(lane))
     }
 
     static func color(for state: ReadinessStep.State) -> Color {
@@ -92,25 +120,91 @@ extension Color {
     }
 }
 
-/// A white card on the canvas with a hairline edge.
+/// WCAG relative-luminance contrast between two sRGB colors. Pure, so palettes can be tested.
+nonisolated enum Contrast {
+    static func ratio(_ first: UInt32, _ second: UInt32) -> Double {
+        let (a, b) = (luminance(first), luminance(second))
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// `top` at `opacity` over `bottom`, per channel.
+    static func blend(_ top: UInt32, over bottom: UInt32, opacity: Double) -> UInt32 {
+        func channel(_ shift: UInt32) -> UInt32 {
+            let t = Double((top >> shift) & 0xFF), b = Double((bottom >> shift) & 0xFF)
+            return UInt32((t * opacity + b * (1 - opacity)).rounded()) << shift
+        }
+        return channel(16) | channel(8) | channel(0)
+    }
+
+    static func luminance(_ hex: UInt32) -> Double {
+        func channel(_ value: UInt32) -> Double {
+            let c = Double(value) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel((hex >> 16) & 0xFF) + 0.7152 * channel((hex >> 8) & 0xFF) + 0.0722 * channel(hex & 0xFF)
+    }
+}
+
+/// How a card looks selected versus not. Selection is carried by several cues at once
+/// (border, tint, accent bar, and a chevron), never by color alone (#24).
+struct CardSelectionStyle: Equatable {
+    let borderWidth: CGFloat
+    /// Lane-colored wash over the white card.
+    let tintOpacity: Double
+    /// The colored bar on the card's leading edge.
+    let accentBarWidth: CGFloat
+    let showsMarker: Bool
+    let shadowRadius: CGFloat
+    let shadowOpacity: Double
+    /// Where the row's content starts. The same in both states, sized for the widest bar,
+    /// so selecting a row never shifts its text.
+    let contentLeadingInset: CGFloat
+    /// Room kept on the trailing side for the chevron, in every state.
+    let contentTrailingInset: CGFloat
+
+    static let unselected = CardSelectionStyle(borderWidth: 1, tintOpacity: 0, accentBarWidth: 4, showsMarker: false,
+                                               shadowRadius: 2, shadowOpacity: 0.03, contentLeadingInset: 17, contentTrailingInset: 30)
+    static let selected = CardSelectionStyle(borderWidth: 2.5, tintOpacity: 0.08, accentBarWidth: 7, showsMarker: true,
+                                             shadowRadius: 8, shadowOpacity: 0.12, contentLeadingInset: 17, contentTrailingInset: 30)
+    /// "This is on", not "this is selected" (the Merge Rules switches): a light accent border only.
+    static let highlighted = CardSelectionStyle(borderWidth: 1.5, tintOpacity: 0, accentBarWidth: 4, showsMarker: false,
+                                                shadowRadius: 4, shadowOpacity: 0.06, contentLeadingInset: 17, contentTrailingInset: 30)
+
+    static func style(isSelected: Bool) -> CardSelectionStyle { isSelected ? .selected : .unselected }
+
+    /// The tinted card under a selected border, for contrast checks.
+    static func tintedSurface(_ lane: UInt32) -> UInt32 {
+        Contrast.blend(lane, over: Theme.Hex.surface, opacity: selected.tintOpacity)
+    }
+}
+
+/// A white card on the canvas with a hairline edge; selected cards get a tint and a strong border.
 struct CardBackground: ViewModifier {
     var isSelected = false
+    var isHighlighted = false
     var accent: Color = Theme.ink
 
     func body(content: Content) -> some View {
+        let style = isSelected ? CardSelectionStyle.selected : isHighlighted ? .highlighted : .unselected
+        let isAccented = isSelected || isHighlighted
         content
-            .background(Theme.surface, in: .rect(cornerRadius: 10))
+            .background {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 10).fill(accent.opacity(style.tintOpacity)))
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isSelected ? accent : Theme.hairline, lineWidth: isSelected ? 1.5 : 1)
+                    .strokeBorder(isAccented ? accent : Theme.hairline, lineWidth: style.borderWidth)
             }
-            .shadow(color: .black.opacity(isSelected ? 0.08 : 0.03), radius: isSelected ? 6 : 2, y: 1)
+            .shadow(color: .black.opacity(style.shadowOpacity), radius: style.shadowRadius, y: 1)
     }
 }
 
 extension View {
-    func card(isSelected: Bool = false, accent: Color = Theme.ink) -> some View {
-        modifier(CardBackground(isSelected: isSelected, accent: accent))
+    /// `isSelected`: the strong selected look. `isHighlighted`: a light accent border for "on" states.
+    func card(isSelected: Bool = false, isHighlighted: Bool = false, accent: Color = Theme.ink) -> some View {
+        modifier(CardBackground(isSelected: isSelected, isHighlighted: isHighlighted, accent: accent))
     }
 }
 
