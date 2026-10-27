@@ -73,6 +73,11 @@ struct TriageView: View {
         .focused($isFocused)
         .onKeyPress(.downArrow) { center.selectNext(); return .handled }
         .onKeyPress(.upArrow) { center.selectPrevious(); return .handled }
+        .onKeyPress(characters: CharacterSet(charactersIn: "iI")) { press in
+            guard press.modifiers.isDisjoint(with: [.command, .option, .control]), let mr = store.selected else { return .ignored }
+            center.editLabels(mr)
+            return .handled
+        }
         .onKeyPress(.return) {
             guard let mr = store.selected else { return .ignored }
             appModel.review(mr)
@@ -309,6 +314,7 @@ private struct RowMenu: View {
         if !mr.isAuthor, let me = appModel.mergeRequests.username, !mr.approvedByUsernames.contains(me) {
             Button("Approve") { Task { await appModel.commandCenter.approve(mr) } }
         }
+        Button("Labels…") { appModel.commandCenter.editLabels(mr) }
         Button("Merge…") { appModel.commandCenter.requestMerge(mr) }
             .disabled(mr.isDraft || !mr.hasLoadedDetails)
         Divider()

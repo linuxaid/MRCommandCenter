@@ -75,6 +75,10 @@ final class CommandCenter {
     private(set) var actionErrors: [String: String] = [:]
     /// The MR waiting for you to confirm a merge (drives the merge sheet).
     var mergeDraft: MergeDraft?
+    /// The MR whose labels are being edited (drives the label picker, opened with I).
+    var labelEditorKey: String?
+    /// Project labels, fetched once per project per session.
+    private var projectLabelCache: [Int: [GitLabLabel]] = [:]
     /// Merges you started that failed after the dialog closed, newest first. Shown as a banner
     /// until dismissed, since you've usually moved on to another MR by then.
     private(set) var mergeFailures: [MergeFailure] = []
@@ -432,6 +436,42 @@ final class CommandCenter {
             "GitLab rejected the merge (422)."
         default:
             error.localizedDescription
+        }
+    }
+
+    // MARK: Labels
+
+    /// Opens the label picker for an MR.
+    func editLabels(_ mr: TrackedMR) {
+        labelEditorKey = mr.key
+    }
+
+    /// The labels defined in the MR's project, sorted by name.
+    func projectLabels(for mr: TrackedMR) async throws -> [GitLabLabel] {
+        if let cached = projectLabelCache[mr.projectID] { return cached }
+        let client = try dependencies.gitLabClient(settings: settings)
+        let labels = try await client.projectLabels(projectID: mr.projectID)
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        projectLabelCache[mr.projectID] = labels
+        return labels
+    }
+
+    /// Adds (`applied: true`) or removes a label on the MR. Returns a readable error, or nil on success.
+    func setLabel(_ name: String, on mr: TrackedMR, applied: Bool) async -> String? {
+        do {
+            let client = try dependencies.gitLabClient(settings: settings)
+            let updated = try await client.updateLabels(projectID: mr.projectID, iid: mr.iid,
+                                                        add: applied ? [name] : [], remove: applied ? [] : [name])
+            mr.update(from: updated)
+            // The update response names labels without colors; use the project's.
+            let known = projectLabelCache[mr.projectID]?.filter { mr.labels.contains($0.name) } ?? []
+            mr.labelStylesData = TrackedMR.mergedStyles(existing: mr.labelStylesData, with: known)
+            store.record(.init(kind: .other, message: applied ? "You added the label “\(name)”" : "You removed the label “\(name)”"), for: mr)
+            save()
+            return nil
+        } catch {
+            Log.sync.error("Label update failed: \(error.localizedDescription, privacy: .public)")
+            return Self.describeActionFailure(error)
         }
     }
 

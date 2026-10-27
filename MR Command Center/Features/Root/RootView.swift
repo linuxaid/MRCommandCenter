@@ -30,6 +30,11 @@ struct RootView: View {
         .sheet(item: Bindable(center).mergeDraft) { draft in
             MergeSheet(draft: draft)
         }
+        .sheet(isPresented: Binding(get: { center.labelEditorKey != nil }, set: { if !$0 { center.labelEditorKey = nil } })) {
+            if let key = center.labelEditorKey {
+                LabelPicker(editor: LabelEditor(mrKey: key, service: center))
+            }
+        }
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
