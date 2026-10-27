@@ -18,6 +18,8 @@ nonisolated protocol GitLabAPI: Sendable {
     func diffs(projectID: Int, iid: Int) async throws -> [GitLabDiff]
     /// A file's raw content at a commit (used by the AI review's file-reading tool).
     func fileContent(projectID: Int, path: String, ref: String) async throws -> String
+    /// A file's raw bytes at a commit (image previews for binary files).
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data
     /// Starts a new comment thread on a diff line. Requires the `api` scope.
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion
     /// Starts a general (resolvable) thread on the MR, not tied to a line. Requires the `api` scope.

@@ -31,6 +31,18 @@ final class DiffService {
         return await Self.parse(diffs, headSHA: headSHA, changesCount: mr.changesCount, fetchedAt: now, refs: refs)
     }
 
+    /// Image bytes for a preview, cached in memory per commit and path (a commit's file never changes).
+    private var imageCache: [String: Data] = [:]
+
+    func imageData(for mr: TrackedMR, side: ImagePreview.Side) async throws -> Data {
+        let key = "\(mr.projectID):\(side.ref):\(side.path)"
+        if let cached = imageCache[key] { return cached }
+        let client = try dependencies.gitLabClient(settings: AccountSettings.current(in: context))
+        let data = try await client.rawFile(projectID: mr.projectID, path: side.path, ref: side.ref)
+        imageCache[key] = data
+        return data
+    }
+
     func cachedSnapshot(mrKey: String, headSHA: String) -> DiffSnapshot? {
         let id = DiffSnapshot.makeID(mrKey: mrKey, headSHA: headSHA)
         var descriptor = FetchDescriptor<DiffSnapshot>(predicate: #Predicate { $0.id == id })

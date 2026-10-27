@@ -150,7 +150,9 @@ struct ChangesView: View {
                     layout: $layout,
                     isCollapsed: model.isCollapsed(file, threshold: collapseThreshold),
                     expand: { model.expandedFileIDs.insert(file.id) },
-                    openInBrowser: { openInBrowser(file) }
+                    openInBrowser: { openInBrowser(file) },
+                    mr: mr,
+                    refs: model.diff?.refs
                 )
             } else {
                 ContentUnavailableView("No File Selected", systemImage: "doc")

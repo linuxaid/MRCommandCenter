@@ -107,6 +107,11 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         return try await mock.fileContent(projectID: projectID, path: path, ref: ref)
     }
 
+    func rawFile(projectID: Int, path: String, ref: String) async throws -> Data {
+        record("rawFile")
+        return try await mock.rawFile(projectID: projectID, path: path, ref: ref)
+    }
+
     func createDiffDiscussion(projectID: Int, iid: Int, request: NewDiffDiscussionRequest) async throws -> GitLabDiscussion {
         record("createDiscussion")
         if let failure = state.withLock({ $0.postFailure }) { throw failure }
