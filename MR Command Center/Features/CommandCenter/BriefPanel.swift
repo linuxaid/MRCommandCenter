@@ -480,37 +480,139 @@ private struct AutoMergeCard: View {
     }
 }
 
-/// Jira, static checks, and the AI verdict, one line each.
+/// The MR's Jira issue in detail (#25): status, type, priority, fix version, and assignee,
+/// with the description to expand. The AI verdict sits underneath on its own line.
 private struct ContextCard: View {
     let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+    @Query private var settingsRows: [AccountSettings]
+    @State private var showsStory = false
 
     var body: some View {
+        let summary = JiraSummary.make(for: mr, details: appModel.jira.details(for: mr.jiraKey))
         VStack(alignment: .leading, spacing: 10) {
-            Text("CONTEXT").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
-            VStack(alignment: .leading, spacing: 8) {
-                line("Jira", MRStatusLine.jiraItem(for: mr))
-                line("Checks", MRStatusLine.checksItem(for: mr))
-                line("AI review", MRStatusLine.aiItem(for: mr))
+            Text("JIRA").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+            VStack(alignment: .leading, spacing: 10) {
+                switch summary.state {
+                case .found:
+                    found(summary)
+                case .noKey(let branch):
+                    message("No Jira key in branch \(branch)", systemImage: "ticket", tone: Theme.caution)
+                case .notConnected:
+                    HStack {
+                        message("\(summary.key ?? ""): connect Jira to see its details.", systemImage: "ticket", tone: Theme.inkSecondary)
+                        SettingsLink { Text("Open Accounts…") }.font(.callout)
+                    }
+                case .loading:
+                    HStack {
+                        Text(summary.key ?? "").font(.callout.monospaced())
+                        ProgressView().controlSize(.small)
+                    }
+                case .notFound:
+                    message("\(summary.key ?? "") wasn't found in Jira, or your token can't see it.",
+                            systemImage: "xmark.octagon", tone: Theme.danger)
+                case .failed(let error):
+                    message("\(summary.key ?? ""): \(error)", systemImage: "exclamationmark.triangle", tone: Theme.caution)
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card()
+            aiLine
         }
     }
 
-    private func line(_ title: String, _ item: StatusItem) -> some View {
-        HStack {
-            Text(title).foregroundStyle(Theme.inkSecondary).frame(width: 80, alignment: .leading)
-            Label {
-                Text(item.title).foregroundStyle(Theme.ink)
-            } icon: {
-                Image(systemName: item.systemImage).foregroundStyle(item.tone.color)
+    @ViewBuilder
+    private func found(_ summary: JiraSummary) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let key = summary.key, let url = browseURL(key) {
+                Link(key, destination: url)
+                    .font(.callout.monospaced().weight(.semibold))
+                    .help("Open \(key) in Jira")
+            } else {
+                Text(summary.key ?? "").font(.callout.monospaced().weight(.semibold))
             }
-            Spacer()
+            if let title = summary.title {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
         }
-        .font(.callout)
+        // Plain rows with a fixed label width: a `Grid` here caused AppKit layout loops (PLAN.md).
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(summary.rows) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(row.label)
+                        .foregroundStyle(Theme.inkSecondary)
+                        .frame(width: 84, alignment: .leading)
+                    Group {
+                        switch row.tone {
+                        case .positive:
+                            Label(row.value, systemImage: "checkmark.circle.fill").foregroundStyle(Theme.ready)
+                        case .warning:
+                            Label(row.value, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.caution)
+                        case .normal:
+                            Text(row.value).foregroundStyle(Theme.ink)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .font(.callout)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        if summary.hasStory {
+            DisclosureGroup(isExpanded: $showsStory) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let description = summary.description {
+                        Text(description)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let criteria = summary.acceptanceCriteria {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Acceptance criteria").fontWeight(.semibold)
+                            Text(criteria).textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .font(.callout)
+                .foregroundStyle(Theme.ink)
+                .padding(.top, 6)
+            } label: {
+                Text(summary.description != nil ? "Description" : "Acceptance criteria")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(Theme.inkSecondary)
+            }
+        }
+    }
+
+    private func message(_ text: String, systemImage: String, tone: Color) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.callout)
+            .foregroundStyle(tone)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var aiLine: some View {
+        let item = MRStatusLine.aiItem(for: mr)
+        return HStack(spacing: 6) {
+            Image(systemName: item.systemImage).foregroundStyle(item.tone.color)
+            Text("AI review: \(item.title)").foregroundStyle(Theme.inkSecondary)
+        }
+        .font(.caption)
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title): \(item.accessibilityLabel)")
+        .accessibilityLabel(item.accessibilityLabel)
+    }
+
+    private func browseURL(_ key: String) -> URL? {
+        guard let base = try? BaseURL.normalize(settingsRows.first?.jiraBaseURL ?? "", strippingSuffixes: BaseURL.jiraSuffixes) else { return nil }
+        return base.appending(path: "browse").appending(path: key)
     }
 }
 
