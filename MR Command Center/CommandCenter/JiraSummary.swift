@@ -32,9 +32,11 @@ struct JiraSummary: Equatable {
     let rows: [Row]
     let description: String?
     let acceptanceCriteria: String?
+    /// The latest refresh failed, so the details shown are from an earlier one.
+    var staleError: String?
 
     /// Something to expand under the details.
-    var hasStory: Bool { description != nil || acceptanceCriteria != nil }
+    var hasExpandableText: Bool { description != nil || acceptanceCriteria != nil }
 
     static func make(for mr: TrackedMR, details: JiraIssueDetails?) -> JiraSummary {
         guard let key = mr.jiraKey else {
@@ -50,7 +52,9 @@ struct JiraSummary: Equatable {
         case nil: return empty(.loading)
         case .found?, .failed?:
             guard let details else { return empty(.failed(mr.jiraError ?? "Couldn't load the issue.")) }
-            return found(details, passing: mr.jiraPassing == true)
+            var summary = found(details, passing: mr.jiraPassing == true)
+            summary.staleError = mr.jiraError
+            return summary
         }
     }
 

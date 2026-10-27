@@ -36,8 +36,50 @@ struct JiraSummaryTests {
 
     @Test func descriptionAndCriteriaCanBeExpanded() async throws {
         let pay142 = try summary(await loaded(), 412)
-        #expect(pay142.hasStory)
+        #expect(pay142.hasExpandableText)
         #expect(pay142.description?.contains("Merchants miss webhooks") == true)
+        #expect(pay142.acceptanceCriteria != nil)
+    }
+
+    @Test func criteriaAloneCanBeExpanded() {
+        var details = JiraIssueDetails(issue: MockJiraData.issues["PAY-142"]!, acceptanceCriteriaFieldID: "", priorityFieldID: "")
+        details.description = "  "
+        details.acceptanceCriteria = "- Retries"
+        let summary = JiraSummary.found(details, passing: true)
+        #expect(summary.description == nil)
+        #expect(summary.hasExpandableText)
+    }
+
+    @Test func staleDetailsSayTheLastRefreshFailed() async throws {
+        let app = await loaded()
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
+        mr.jiraError = "Can't reach the server."
+        let summary = JiraSummary.make(for: mr, details: app.jira.details(for: mr.jiraKey))
+        #expect(summary.state == .found)
+        #expect(summary.staleError == "Can't reach the server.")
+    }
+
+    @Test func freshDetailsHaveNoStaleWarning() async throws {
+        #expect(try summary(await loaded(), 412).staleError == nil)
+    }
+
+    @Test func failedWithNothingCached() async throws {
+        let app = await loaded()
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
+        mr.jiraLookupRaw = JiraLookup.failed.rawValue
+        mr.jiraError = nil
+        #expect(JiraSummary.make(for: mr, details: nil).state == .failed("Couldn't load the issue."))
+        mr.jiraError = "Timed out"
+        #expect(JiraSummary.make(for: mr, details: nil).state == .failed("Timed out"))
+    }
+
+    @Test func notLookedUpYetIsLoading() async throws {
+        let app = await loaded()
+        let mr = try #require(app.mergeRequests.trackedMergeRequests.first { $0.iid == 412 })
+        mr.jiraLookupRaw = nil
+        let summary = JiraSummary.make(for: mr, details: nil)
+        #expect(summary.state == .loading)
+        #expect(summary.key == "PAY-142")
     }
 
     @Test func missingPriorityIsCalledOut() async throws {

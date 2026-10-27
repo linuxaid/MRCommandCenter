@@ -189,8 +189,7 @@ private struct OverviewJiraSection: View {
     }
 
     private func browseURL(_ key: String) -> URL? {
-        guard let base = try? BaseURL.normalize(settingsRows.first?.jiraBaseURL ?? "", strippingSuffixes: BaseURL.jiraSuffixes) else { return nil }
-        return base.appending(path: "browse").appending(path: key)
+        settingsRows.first?.jiraBrowseURL(for: key)
     }
 }
 

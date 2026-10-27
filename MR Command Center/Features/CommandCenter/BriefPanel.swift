@@ -499,7 +499,7 @@ private struct ContextCard: View {
                 case .noKey(let branch):
                     message("No Jira key in branch \(branch)", systemImage: "ticket", tone: Theme.caution)
                 case .notConnected:
-                    HStack {
+                    VStack(alignment: .leading, spacing: 6) {
                         message("\(summary.key ?? ""): connect Jira to see its details.", systemImage: "ticket", tone: Theme.inkSecondary)
                         SettingsLink { Text("Open Accounts…") }.font(.callout)
                     }
@@ -518,6 +518,8 @@ private struct ContextCard: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card()
+            Text("AI REVIEW").font(Theme.eyebrow).foregroundStyle(Theme.inkTertiary)
+                .padding(.top, 8)
             aiLine
         }
     }
@@ -564,7 +566,13 @@ private struct ContextCard: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        if summary.hasStory {
+        if let error = summary.staleError {
+            Label("Last refresh failed, so this may be out of date: \(error)", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(Theme.caution)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if summary.hasExpandableText {
             DisclosureGroup(isExpanded: $showsStory) {
                 VStack(alignment: .leading, spacing: 10) {
                     if let description = summary.description {
@@ -602,17 +610,15 @@ private struct ContextCard: View {
         let item = MRStatusLine.aiItem(for: mr)
         return HStack(spacing: 6) {
             Image(systemName: item.systemImage).foregroundStyle(item.tone.color)
-            Text("AI review: \(item.title)").foregroundStyle(Theme.inkSecondary)
+            Text(item.title).foregroundStyle(Theme.ink)
         }
-        .font(.caption)
-        .padding(.horizontal, 4)
+        .font(.callout)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.accessibilityLabel)
     }
 
     private func browseURL(_ key: String) -> URL? {
-        guard let base = try? BaseURL.normalize(settingsRows.first?.jiraBaseURL ?? "", strippingSuffixes: BaseURL.jiraSuffixes) else { return nil }
-        return base.appending(path: "browse").appending(path: key)
+        settingsRows.first?.jiraBrowseURL(for: key)
     }
 }
 
