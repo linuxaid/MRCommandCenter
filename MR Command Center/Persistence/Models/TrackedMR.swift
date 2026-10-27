@@ -265,14 +265,12 @@ nonisolated struct ThreadTurns: Equatable {
         guard let me else { return }
         var latestReply: Date?
         for thread in discussions where thread.isUnresolved {
-            let notes = thread.userNotes
-            guard let last = notes.last, let lastAuthor = last.author else { continue }
+            guard let last = thread.userNotes.last, let lastAuthor = last.author else { continue }
             if lastAuthor.username == me {
                 awaitingOthers += 1
                 continue
             }
-            let involved = isMyMR || notes.contains { $0.author?.username == me }
-            guard involved else { continue }
+            guard Self.isWaitingOnMe(thread, me: me, isMyMR: isMyMR) else { continue }
             awaitingMe += 1
             let date = last.createdAt ?? .distantPast
             if latestReply.map({ date >= $0 }) ?? true {

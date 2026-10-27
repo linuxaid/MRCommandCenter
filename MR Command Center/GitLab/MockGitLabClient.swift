@@ -259,17 +259,19 @@ nonisolated struct MockGitLabData: Sendable {
                 createdAt: d.createdAt, updatedAt: d.updatedAt.addingTimeInterval(60), sourceBranch: d.sourceBranch,
                 targetBranch: d.targetBranch, author: d.author, draft: d.draft, workInProgress: d.workInProgress,
                 labels: d.labels, sha: d.sha, hasConflicts: d.hasConflicts,
-                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left),
+                detailedMergeStatus: Self.status(d.detailedMergeStatus, approvalsLeft: approvals.left,
+                                                 unresolved: discussions.count(where: \.isUnresolved)),
                 references: d.references, webUrl: d.webUrl, userNotesCount: d.userNotesCount,
                 mergeWhenPipelineSucceeds: d.mergeWhenPipelineSucceeds, reviewers: d.reviewers,
                 headPipeline: d.headPipeline, diffRefs: d.diffRefs, changesCount: d.changesCount
             )
         }
 
-        private static func status(_ status: String?, approvalsLeft: Int) -> String? {
-            if approvalsLeft == 0 && status == "not_approved" { return "mergeable" }
-            if approvalsLeft > 0 && status == "mergeable" { return "not_approved" }
-            return status
+        /// GitLab's status after approvals or threads changed: approvals are checked first, then threads.
+        private static func status(_ status: String?, approvalsLeft: Int, unresolved: Int) -> String? {
+            guard ["mergeable", "not_approved", "discussions_not_resolved"].contains(status) else { return status }
+            if approvalsLeft > 0 { return "not_approved" }
+            return unresolved > 0 ? "discussions_not_resolved" : "mergeable"
         }
 
         var listItem: GitLabMergeRequest {

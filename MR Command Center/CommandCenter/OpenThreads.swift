@@ -55,7 +55,8 @@ struct OpenThread: Identifiable, Equatable {
     }
 }
 
-/// The brief's Open threads card (#28): loads the threads and resolves them, one row at a time.
+/// The brief's Open threads card (#28): loads the threads and resolves them. Rows always come
+/// from `DiscussionService`'s cache, which the diff's threads share, so both stay in step.
 @Observable
 final class OpenThreadsModel {
     private(set) var threads: [OpenThread] = []
@@ -64,30 +65,42 @@ final class OpenThreadsModel {
     private(set) var loadError: String?
     private(set) var resolving: Set<String> = []
     private(set) var errors: [String: String] = [:]
+    /// Bumped by every load and resolve, so a slow, older load can't put back a resolved row.
+    private var generation = 0
 
     /// `force` skips the short discussion cache, for when the MR changed on GitLab.
     func load(_ mr: TrackedMR, service: DiscussionService, me: String?, force: Bool) async {
+        generation += 1
+        let mine = generation
         do {
             let discussions = try await service.discussions(for: mr, forceRefresh: force)
+            guard mine == generation else { return }
             threads = OpenThread.open(in: discussions, me: me, isMyMR: mr.isAuthor)
             loadError = nil
         } catch is CancellationError {
             return
         } catch {
+            guard mine == generation else { return }
             loadError = error.localizedDescription
         }
         hasLoaded = true
     }
 
-    /// A resolved thread leaves the list; a failure keeps it and shows why.
-    func resolve(_ thread: OpenThread, on mr: TrackedMR, service: DiscussionService) async {
+    /// Resolves on GitLab, then shows the threads as they are now (including any that arrived).
+    /// A failure keeps the row and shows why.
+    func resolve(_ thread: OpenThread, on mr: TrackedMR, service: DiscussionService, me: String?) async {
         guard !resolving.contains(thread.id) else { return }
+        generation += 1
         resolving.insert(thread.id)
         defer { resolving.remove(thread.id) }
         errors[thread.id] = nil
         do {
             try await service.setResolved(thread.id, resolved: true, mr: mr)
-            threads.removeAll { $0.id == thread.id }
+            if let cached = service.cachedDiscussions(for: mr.key) {
+                threads = OpenThread.open(in: cached, me: me, isMyMR: mr.isAuthor)
+            } else {
+                threads.removeAll { $0.id == thread.id }
+            }
         } catch {
             errors[thread.id] = error.localizedDescription
         }

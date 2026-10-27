@@ -118,8 +118,10 @@ final class DiscussionService {
         return note
     }
 
-    /// Where activity lines go (`MergeRequestStore.record`), set by `AppModel`.
-    var recordActivity: ((ActivityDetector.Change, TrackedMR) -> Void)?
+    /// Records something you did in Activity without marking the MR as having news. Set by `AppModel`.
+    var recordOwnActivity: ((ActivityDetector.Change, TrackedMR) -> Void)?
+    /// Refetches the MR (status, approvals, threads) and logs what changed. Set by `AppModel`.
+    var refreshMergeRequest: ((TrackedMR) async -> Void)?
 
     /// Resolves (or reopens) a thread so the MR can merge, and records it in Activity.
     /// Not gated by "Allow posting comments": like Approve and Merge, it only needs the api scope.
@@ -132,26 +134,34 @@ final class DiscussionService {
         } catch APIError.forbidden {
             throw CommentPostingError.resolveNeedsAPIScope
         }
-        // Recount from a fresh fetch: the cache may predate threads that arrived since.
-        if (try? await discussions(for: mr, forceRefresh: true)) == nil {
-            // Couldn't refetch: patch the cache, and move the count by just this thread.
-            if var cached = cache[mr.key]?.discussions, let index = cached.firstIndex(where: { $0.id == discussionID }) {
-                let wasUnresolved = cached[index].isUnresolved
-                cached[index] = updated
-                cache[mr.key] = (cache[mr.key]?.fetchedAt ?? .now, cached)
-                if wasUnresolved != updated.isUnresolved {
-                    mr.unresolvedDiscussions = max(0, mr.unresolvedDiscussions + (updated.isUnresolved ? 1 : -1))
-                }
+        var patched = cache[mr.key]?.discussions ?? []
+        if let index = patched.firstIndex(where: { $0.id == discussionID }) {
+            patched[index] = updated
+            cache[mr.key] = (cache[mr.key]?.fetchedAt ?? .now, patched)
+        }
+
+        // Refetch the MR so GitLab's merge status (and with it, readiness) follows the threads,
+        // and the refresh logs what this unblocked ("All threads resolved", "Ready to merge").
+        await refreshMergeRequest?(mr)
+        let refreshed = refreshMergeRequest != nil && mr.detailsError == nil
+        // Recount from a fresh fetch: the cache may predate threads that arrived since. If that
+        // fails, use the patched cache, which may be a little stale but has this change.
+        if (try? await discussions(for: mr, forceRefresh: true)) == nil, cache[mr.key] != nil {
+            updateCounts(for: mr, with: patched)
+        }
+        if !refreshed {
+            for change in ActivityDetector.changes(from: before, to: MRSnapshot(mr)) {
+                recordOwnActivity?(change, mr)
             }
         }
+
         let me = AccountSettings.current(in: context).gitLabUsername
         let starter = updated.userNotes.first?.author
-        let whose = starter?.username == me ? "your" : starter.map { "\($0.name.split(separator: " ").first ?? "")'s" } ?? "a"
-        recordActivity?(ActivityDetector.Change(kind: .other, message: "You \(resolved ? "resolved" : "reopened") \(whose) thread"), mr)
-        // What resolving changed: all threads resolved, ready to merge...
-        for change in ActivityDetector.changes(from: before, to: MRSnapshot(mr)) {
-            recordActivity?(change, mr)
-        }
+        let firstName = starter?.name.split(separator: " ").first.map(String.init) ?? ""
+        let whose = if let starter, let me, starter.username == me { "your thread" }
+            else if !firstName.isEmpty { "\(firstName)'s thread" }
+            else { "a thread" }
+        recordOwnActivity?(ActivityDetector.Change(kind: .other, message: "You \(resolved ? "resolved" : "reopened") \(whose)"), mr)
         try? context.save()
         Log.sync.info("Changed a thread's resolved state")
     }

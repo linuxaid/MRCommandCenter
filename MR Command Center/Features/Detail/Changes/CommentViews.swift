@@ -125,7 +125,7 @@ struct ThreadView: View {
                 if let error = comments.resolveErrors[discussion.id] {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Theme.danger)
                 }
             }
         }

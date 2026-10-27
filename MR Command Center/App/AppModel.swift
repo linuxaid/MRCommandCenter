@@ -36,7 +36,13 @@ final class AppModel {
         diffs = DiffService(container: modelContainer, dependencies: dependencies)
         discussions = DiscussionService(container: modelContainer, dependencies: dependencies)
         let store = mergeRequests
-        discussions.recordActivity = { change, mr in store.record(change, for: mr) }
+        discussions.recordOwnActivity = { change, mr in
+            // Your own action: in Activity, but not "new since you looked".
+            let alreadySeen = !mr.hasUnseenActivity
+            store.record(change, for: mr)
+            if alreadySeen { mr.seenAt = mr.lastActivityAt }
+        }
+        discussions.refreshMergeRequest = { mr in await store.refreshDetails(for: mr) }
         staticChecks = StaticCheckService(container: modelContainer, diffs: diffs)
         jira = JiraService(container: modelContainer, dependencies: dependencies)
         aiReview = AIReviewService(container: modelContainer, dependencies: dependencies, diffs: diffs, staticChecks: staticChecks, jira: jira)

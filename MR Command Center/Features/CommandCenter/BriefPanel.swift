@@ -540,6 +540,20 @@ private struct AutoMergeCard: View {
     }
 }
 
+private struct ThreadsLoadKey: Equatable {
+    let key: String
+    let updatedAt: Date
+    let unresolved: Int
+    let awaitingMe: Int
+
+    init(mr: TrackedMR) {
+        key = mr.key
+        updatedAt = mr.lastSeenUpdatedAt
+        unresolved = mr.unresolvedDiscussions
+        awaitingMe = mr.threadsAwaitingMe
+    }
+}
+
 /// Every unresolved comment thread, with Resolve (#28). Click a thread to see it on its line.
 private struct OpenThreadsCard: View {
     let mr: TrackedMR
@@ -575,11 +589,12 @@ private struct OpenThreadsCard: View {
                 }
             }
         }
-        // Reload when the MR changes on GitLab, skipping the short cache so new threads show.
-        .task(id: "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)") {
-            let key = mr.key
+        // Reload when the MR changes on GitLab (skipping the short cache so new threads show), and
+        // when its thread counts change, e.g. a thread resolved in the diff beside this rail.
+        .task(id: ThreadsLoadKey(mr: mr)) {
+            let key = "\(mr.key)@\(mr.lastSeenUpdatedAt.timeIntervalSince1970)"
             await model.load(mr, service: appModel.discussions, me: appModel.mergeRequests.username,
-                             force: lastLoadKey == key)
+                             force: lastLoadKey != nil && lastLoadKey != key && lastLoadKey?.hasPrefix(mr.key + "@") == true)
             lastLoadKey = key
         }
     }
@@ -624,7 +639,7 @@ private struct OpenThreadsCard: View {
             .buttonStyle(.plain)
             .help(thread.path == nil ? "Open the changes" : "Show this thread in the diff")
             Button {
-                Task { await model.resolve(thread, on: mr, service: appModel.discussions) }
+                Task { await model.resolve(thread, on: mr, service: appModel.discussions, me: appModel.mergeRequests.username) }
             } label: {
                 if model.resolving.contains(thread.id) {
                     ProgressView().controlSize(.small)

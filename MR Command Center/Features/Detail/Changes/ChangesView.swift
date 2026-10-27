@@ -26,7 +26,7 @@ struct ChangesView: View {
     var body: some View {
         withAI
             // Reload threads when the diff loads and whenever the MR changes on GitLab.
-            .task(id: CommentsKey(diffSHA: model.diff?.headSHA, updatedAt: mr.lastSeenUpdatedAt)) {
+            .task(id: CommentsKey(diffSHA: model.diff?.headSHA, updatedAt: mr.lastSeenUpdatedAt, unresolved: mr.unresolvedDiscussions)) {
                 guard let diff = model.diff else { return }
                 await comments.load(mr: mr, diff: diff, service: appModel.discussions)
             }
@@ -263,6 +263,8 @@ private struct AIStrip: View {
 private struct CommentsKey: Equatable {
     let diffSHA: String?
     let updatedAt: Date
+    /// Changes when a thread is resolved elsewhere (the brief rail), so the diff redraws from the shared cache.
+    var unresolved = 0
 }
 
 private struct DiffFileList: View {

@@ -18,6 +18,7 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var rawFileFailure: APIError?
         var labelFailure: APIError?
         var resolveFailure: APIError?
+        var discussionsFailure: APIError?
         /// Holds a label update's reply for a while (by label name), to deliver replies out of order.
         var labelReplyDelays: [String: Duration] = [:]
         var rawFileOverride: Data?
@@ -127,6 +128,7 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
 
     func discussions(projectID: Int, iid: Int) async throws -> [GitLabDiscussion] {
         record("discussions")
+        if let failure = state.withLock({ $0.discussionsFailure }) { throw failure }
         return try await mock.discussions(projectID: projectID, iid: iid)
     }
 

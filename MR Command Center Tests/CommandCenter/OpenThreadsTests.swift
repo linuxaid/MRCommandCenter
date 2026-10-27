@@ -131,6 +131,10 @@ struct OpenThreadsTests {
         let kinds = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
             .filter { $0.mrKey == mine.key }.map(\.kind)
         #expect(kinds.contains(.threadsResolved))
+        #expect(kinds.contains(.readyToMerge), "GitLab's merge status was refetched, so readiness follows")
+        #expect(Readiness(mine).isReady)
+        #expect(mine.detailedMergeStatus == "mergeable")
+        #expect(app.commandCenter.situation(for: mine).lane == .readyToMerge)
     }
 
     @Test func threadOnARemovedLineOpensAtItsFile() {
@@ -180,12 +184,12 @@ struct OpenThreadsTests {
 
         let target = try #require(model.threads.first)
         spy.edit { $0.resolveFailure = .offline }
-        await model.resolve(target, on: mr, service: app.discussions)
+        await model.resolve(target, on: mr, service: app.discussions, me: app.mergeRequests.username)
         #expect(model.threads.contains { $0.id == target.id })
         #expect(model.errors[target.id] != nil)
 
         spy.edit { $0.resolveFailure = nil }
-        await model.resolve(target, on: mr, service: app.discussions)
+        await model.resolve(target, on: mr, service: app.discussions, me: app.mergeRequests.username)
         #expect(!model.threads.contains { $0.id == target.id })
         #expect(model.errors[target.id] == nil)
     }
@@ -198,5 +202,45 @@ struct OpenThreadsTests {
         await model.load(mine, service: app.discussions, me: app.mergeRequests.username, force: true)
         #expect(model.hasLoaded)
         #expect(model.threads.isEmpty, "The card hides instead of spinning forever")
+    }
+
+    @Test func whenTheRefetchFailsTheCountsStillFollowTheResolve() async throws {
+        let (app, spy, mr, _) = try await loaded()
+        #expect(mr.threadsAwaitingMe == 1)
+        spy.edit { $0.discussionsFailure = .offline }
+
+        try await app.discussions.setResolved("412-metric", resolved: true, mr: mr)
+
+        #expect(mr.unresolvedDiscussions == 2)
+        #expect(mr.threadsAwaitingMe == 0, "The thread waiting on you is gone even without a fresh fetch")
+        #expect(app.discussions.cachedDiscussions(for: mr.key)?.first { $0.id == "412-metric" }?.isResolved == true)
+    }
+
+    @Test func resolvingInTheDiffShowsInTheBrief() async throws {
+        let (app, _, mr, _) = try await loaded()
+        let model = OpenThreadsModel()
+        await model.load(mr, service: app.discussions, me: app.mergeRequests.username, force: false)
+        #expect(model.threads.count == 3)
+
+        // The diff resolves through the same service and cache...
+        try await app.discussions.setResolved("412-print", resolved: true, mr: mr)
+        // ...and the brief reloads (its task is keyed on the thread counts) from that cache.
+        await model.load(mr, service: app.discussions, me: app.mergeRequests.username, force: false)
+
+        #expect(model.threads.count == 2)
+        #expect(!model.threads.contains { $0.id == "412-print" })
+    }
+
+    @Test func resolvingInTheBriefPicksUpThreadsThatArrived() async throws {
+        let (app, spy, mr, _) = try await loaded()
+        let model = OpenThreadsModel()
+        await model.load(mr, service: app.discussions, me: app.mergeRequests.username, force: false)
+        addThread(to: 412, id: "412-new", spy: spy)
+
+        await model.resolve(try #require(model.threads.first { $0.id == "412-print" }), on: mr,
+                            service: app.discussions, me: app.mergeRequests.username)
+
+        #expect(model.threads.contains { $0.id == "412-new" })
+        #expect(model.threads.count == mr.unresolvedDiscussions)
     }
 }
