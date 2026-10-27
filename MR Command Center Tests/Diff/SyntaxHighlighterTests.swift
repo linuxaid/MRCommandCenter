@@ -23,7 +23,9 @@ struct SyntaxHighlighterTests {
     @Test(arguments: [("App.swift", "Swift"), ("main.ts", "JavaScript"), ("view.TSX", "JavaScript"), ("api.py", "Python"),
                       ("Main.kt", "Java"), ("main.go", "Go"), ("lib.rs", "Rust"), ("query.sql", "SQL"),
                       ("deploy.sh", "Shell"), ("main.tf", "HCL"), ("config.yml", "YAML"), ("Dockerfile", "Shell"),
-                      ("delivery.m", "C")])
+                      ("delivery.m", "C"), ("Bridge.h", "C"), ("Gemfile.rake", "Ruby"), ("app.rb", "Ruby"),
+                      ("package.json", "JSON"), ("site.css", "CSS"), ("index.html", "Markup"), ("Info.plist", "Markup"),
+                      ("Build.java", "Java")])
     func detectsLanguages(path: String, name: String) {
         #expect(CodeLanguage.forPath(path)?.name == name)
     }
@@ -87,10 +89,10 @@ struct SyntaxHighlighterTests {
     @Test func pythonTripleQuotedStringCarriesAcrossLines() {
         var state = SyntaxHighlighter.State()
         _ = lex(#"doc = """Starts here"#, .python, state: &state)
-        #expect(state.openTripleQuote == #"""""#)
+        #expect(state.openMultilineQuote == #"""""#)
         #expect(lex("def not_code():", .python, state: &state).map(\.1) == [.string])
         _ = lex(#"ends""" "#, .python, state: &state)
-        #expect(state.openTripleQuote == nil)
+        #expect(state.openMultilineQuote == nil)
     }
 
     @Test func removedCommentDoesNotColorAddedLines() {
@@ -102,7 +104,8 @@ struct SyntaxHighlighterTests {
         """).first!
         let tokens = SyntaxHighlighter.highlight([hunk], language: .swift)
         let added = hunk.lines.first { $0.kind == .addition }!
-        #expect(tokens[added.id]?.first?.kind == .keyword, "The added line is lexed on the new side, which has no open comment")
+        #expect(tokens.new[added.id]?.first?.kind == .keyword, "The added line is lexed on the new side, which has no open comment")
+        #expect(tokens.unified(added)?.first?.kind == .keyword)
     }
 
     @Test func tabsAreMeasuredAsDisplayed() {
@@ -116,5 +119,66 @@ struct SyntaxHighlighterTests {
         var state = SyntaxHighlighter.State()
         let attributed = SyntaxColors.attributed(text, tokens: SyntaxHighlighter.tokens(in: text, language: .swift, state: &state))
         #expect(String(attributed.characters) == text)
+    }
+
+    @Test func contextLineInsideARemovedCommentKeepsItsOldSideColors() {
+        let hunk = UnifiedDiffParser.parse("""
+        @@ -1,3 +1,2 @@
+        -/*
+         let hidden = 1
+        -*/
+        """).first!
+        let context = hunk.lines.first { $0.kind == .context }!
+        let tokens = SyntaxHighlighter.highlight([hunk], language: .swift)
+        #expect(tokens.old[context.id]?.map(\.kind) == [.comment], "On the old side it was inside the comment")
+        #expect(tokens.new[context.id]?.first?.kind == .keyword, "On the new side it's code")
+        #expect(tokens.unified(context)?.first?.kind == .keyword)
+    }
+
+    @Test(arguments: [CodeLanguage.javaScript, .go])
+    func backtickStringsCarryAcrossLines(language: CodeLanguage) {
+        var state = SyntaxHighlighter.State()
+        _ = lex("const sql = `select *", language, state: &state)
+        #expect(state.openMultilineQuote == "`")
+        #expect(lex("from users where id = 1", language, state: &state).map(\.1) == [.string])
+        let closing = lex("` + other", language, state: &state)
+        #expect(closing.first?.0 == "`" && closing.first?.1 == .string)
+        #expect(state.openMultilineQuote == nil)
+    }
+
+    @Test func singleLineTemplateLiteral() {
+        #expect(lex("const s = `hi ${name}`;", .javaScript).contains { $0 == ("`hi ${name}`", .string) })
+    }
+
+    @Test func numbersStopAtRangesAndMembers() {
+        let range = lex("for i in 0..<count", .swift)
+        #expect(range.contains { $0 == ("0", .number) })
+        #expect(lex("let d = 1.description", .swift).contains { $0 == ("1", .number) })
+        #expect(lex("let pi = 3.14", .swift).contains { $0 == ("3.14", .number) })
+        #expect(lex("let big = 1_000_000", .swift).contains { $0 == ("1_000_000", .number) })
+    }
+
+    @Test func shellDollarHashIsNotAComment() {
+        #expect(!lex("echo $# args", .shell).contains { $0.1 == .comment })
+        let note = lex("echo hi # note", .shell).last
+        #expect(note?.0 == "# note" && note?.1 == .comment)
+    }
+
+    @Test func kotlinLine() {
+        let tokens = kinds(lex("    @JvmStatic fun load(id: Long): User? = repo.find(id) // cached", .java))
+        #expect(tokens["@JvmStatic"] == .attribute)
+        #expect(tokens["fun"] == .keyword)
+        #expect(tokens["User"] == .type)
+        #expect(tokens["// cached"] == .comment)
+        #expect(tokens["it"] == nil)
+    }
+
+    @Test func rubyPredicateMethodIsOneWord() {
+        #expect(lex("return unless defined?(x)", .ruby).contains { $0 == ("defined?", .keyword) })
+    }
+
+    @Test func rustAttribute() {
+        let attribute = lex("#[derive(Debug, Clone)]", .rust).first
+        #expect(attribute?.0 == "#[derive(Debug, Clone)]" && attribute?.1 == .directive)
     }
 }

@@ -7,7 +7,7 @@ struct UnifiedDiffView: View {
     var scrollRequest: ScrollRequest?
     @State private var highlighted: DiffLine.ID?
     /// Syntax colors per line, worked out once per file (#26).
-    @State private var syntax: [DiffLine.ID: [SyntaxToken]] = [:]
+    @State private var syntax = SyntaxHighlighter.Highlighted()
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -18,7 +18,7 @@ struct UnifiedDiffView: View {
                         HunkHeaderRow(hunk: hunk)
                         ForEach(hunk.lines) { line in
                             VStack(alignment: .leading, spacing: 0) {
-                                UnifiedLineRow(fileID: file.id, line: line, tokens: syntax[line.id], isHighlighted: highlighted == line.id)
+                                UnifiedLineRow(fileID: file.id, line: line, tokens: syntax.unified(line), isHighlighted: highlighted == line.id)
                                 LineThreads(fileID: file.id, line: line)
                             }
                             .id(line.id)
@@ -29,7 +29,8 @@ struct UnifiedDiffView: View {
             }
             .onAppear { scroll(proxy, animated: false) }
             .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
-            .task(id: file.id) { syntax = SyntaxHighlighter.highlight(for: file) }
+            // Keyed by content: a refresh can bring new hunks under the same file ID.
+            .task(id: file.hunks) { syntax = await SyntaxHighlighter.highlightOffMain(file) }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
@@ -57,7 +58,7 @@ struct SideBySideDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
     /// Syntax colors per line, worked out once per file (#26).
-    @State private var syntax: [DiffLine.ID: [SyntaxToken]] = [:]
+    @State private var syntax = SyntaxHighlighter.Highlighted()
     @State private var highlighted: SplitRow.ID?
 
     var body: some View {
@@ -70,9 +71,9 @@ struct SideBySideDiffView: View {
                     ForEach(SideBySide.rows(for: hunk)) { row in
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(alignment: .top, spacing: 0) {
-                                SplitCell(fileID: file.id, line: row.left, side: .old, tokens: row.left.flatMap { syntax[$0.id] })
+                                SplitCell(fileID: file.id, line: row.left, side: .old, tokens: row.left.flatMap { syntax.old[$0.id] })
                                 Divider()
-                                SplitCell(fileID: file.id, line: row.right, side: .new, tokens: row.right.flatMap { syntax[$0.id] })
+                                SplitCell(fileID: file.id, line: row.right, side: .new, tokens: row.right.flatMap { syntax.new[$0.id] })
                             }
                             if let left = row.left {
                                 LineThreads(fileID: file.id, line: left)
@@ -90,7 +91,8 @@ struct SideBySideDiffView: View {
         }
         .onAppear { scroll(proxy, animated: false) }
         .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
-            .task(id: file.id) { syntax = SyntaxHighlighter.highlight(for: file) }
+            // Keyed by content: a refresh can bring new hunks under the same file ID.
+            .task(id: file.hunks) { syntax = await SyntaxHighlighter.highlightOffMain(file) }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)

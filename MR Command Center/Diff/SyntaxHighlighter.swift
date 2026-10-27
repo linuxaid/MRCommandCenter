@@ -20,14 +20,19 @@ nonisolated struct CodeLanguage: Sendable, Equatable {
     var lineComments: [String] = []
     var blockComment: Pair?
     var quotes: [Character] = ["\""]
-    /// `"""` (Swift, Python, Kotlin) or `'''` (Python) strings that can span lines.
-    var tripleQuotes: [String] = []
+    /// Strings that can span lines: `"""` (Swift, Python, Kotlin), `'''` (Python),
+    /// and backticks (JS/TS template literals, Go raw strings).
+    var multilineQuotes: [String] = []
     /// `@` for Swift attributes, Java annotations, Python decorators.
     var attributePrefix: Character?
     /// `#` for Swift (`#if`) and C (`#include`) directives.
     var directivePrefix: Character?
     /// Capitalized identifiers are type names (Swift, Java, TypeScript...).
     var capitalizedTypes = true
+    /// A line comment only starts at the beginning or after whitespace (shell's `$#` isn't one).
+    var commentNeedsSpaceBefore = false
+    /// Characters that may end an identifier (Ruby's `defined?`, `save!`).
+    var identifierSuffixes: Set<Character> = []
 
     nonisolated struct Pair: Sendable, Equatable {
         let open: String
@@ -75,7 +80,7 @@ nonisolated extension CodeLanguage {
                    "protocol", "public", "repeat", "required", "rethrows", "return", "self", "Self", "set", "some",
                    "static", "struct", "subscript", "super", "switch", "throw", "throws", "true", "try", "typealias",
                    "unowned", "var", "weak", "where", "while", "willSet", "consuming", "borrowing", "sending"],
-        lineComments: ["//"], blockComment: cFamilyBlock, tripleQuotes: ["\"\"\""], attributePrefix: "@", directivePrefix: "#"
+        lineComments: ["//"], blockComment: cFamilyBlock, multilineQuotes: ["\"\"\""], attributePrefix: "@", directivePrefix: "#"
     )
 
     static let c = CodeLanguage(
@@ -97,7 +102,7 @@ nonisolated extension CodeLanguage {
                    "keyof", "let", "namespace", "new", "null", "of", "private", "protected", "public", "readonly",
                    "return", "satisfies", "set", "static", "super", "switch", "this", "throw", "true", "try", "type",
                    "typeof", "undefined", "var", "void", "while", "with", "yield"],
-        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'", "`"], attributePrefix: "@"
+        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'"], multilineQuotes: ["`"], attributePrefix: "@"
     )
 
     static let java = CodeLanguage(
@@ -107,9 +112,9 @@ nonisolated extension CodeLanguage {
                    "if", "implements", "import", "in", "instanceof", "int", "interface", "internal", "is", "it", "long",
                    "native", "new", "null", "object", "open", "override", "package", "private", "protected", "public",
                    "return", "sealed", "short", "static", "super", "suspend", "switch", "synchronized", "this", "throw",
-                   "throws", "true", "false", "try", "val", "var", "void", "volatile", "when", "while", "def", "late",
-                   "required", "final", "async", "await"],
-        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'"], tripleQuotes: ["\"\"\""], attributePrefix: "@"
+                   "throws", "true", "false", "try", "val", "var", "void", "volatile", "when", "while",
+                   "required", "async", "await", "companion", "lateinit", "typealias"],
+        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'"], multilineQuotes: ["\"\"\""], attributePrefix: "@"
     )
 
     static let cSharp = CodeLanguage(
@@ -128,7 +133,7 @@ nonisolated extension CodeLanguage {
         keywords: ["break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "false", "for",
                    "func", "go", "goto", "if", "import", "interface", "map", "nil", "package", "range", "return", "select",
                    "struct", "switch", "true", "type", "var", "string", "int", "int64", "bool", "error", "byte", "float64"],
-        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'", "`"]
+        lineComments: ["//"], blockComment: cFamilyBlock, quotes: ["\"", "'"], multilineQuotes: ["`"]
     )
 
     static let rust = CodeLanguage(
@@ -145,7 +150,7 @@ nonisolated extension CodeLanguage {
                    "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is",
                    "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "self", "try", "while", "with", "yield",
                    "match", "case"],
-        lineComments: ["#"], quotes: ["\"", "'"], tripleQuotes: ["\"\"\"", "'''"], attributePrefix: "@"
+        lineComments: ["#"], quotes: ["\"", "'"], multilineQuotes: ["\"\"\"", "'''"], attributePrefix: "@"
     )
 
     static let ruby = CodeLanguage(
@@ -153,7 +158,7 @@ nonisolated extension CodeLanguage {
         keywords: ["alias", "and", "begin", "break", "case", "class", "def", "defined?", "do", "else", "elsif", "end",
                    "ensure", "false", "for", "if", "in", "module", "next", "nil", "not", "or", "redo", "require", "rescue",
                    "retry", "return", "self", "super", "then", "true", "undef", "unless", "until", "when", "while", "yield"],
-        lineComments: ["#"], quotes: ["\"", "'"], attributePrefix: "@"
+        lineComments: ["#"], quotes: ["\"", "'"], attributePrefix: "@", identifierSuffixes: ["?", "!"]
     )
 
     static let shell = CodeLanguage(
@@ -161,12 +166,12 @@ nonisolated extension CodeLanguage {
         keywords: ["if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in",
                    "function", "return", "local", "export", "readonly", "set", "unset", "echo", "exit", "source",
                    "FROM", "RUN", "COPY", "ADD", "CMD", "ENTRYPOINT", "ENV", "ARG", "WORKDIR", "EXPOSE", "USER", "LABEL"],
-        lineComments: ["#"], quotes: ["\"", "'"], capitalizedTypes: false
+        lineComments: ["#"], quotes: ["\"", "'"], capitalizedTypes: false, commentNeedsSpaceBefore: true
     )
 
     static let yaml = CodeLanguage(
         name: "YAML", keywords: ["true", "false", "null", "yes", "no", "on", "off"],
-        lineComments: ["#"], quotes: ["\"", "'"], capitalizedTypes: false
+        lineComments: ["#"], quotes: ["\"", "'"], capitalizedTypes: false, commentNeedsSpaceBefore: true
     )
 
     static let json = CodeLanguage(name: "JSON", keywords: ["true", "false", "null"], quotes: ["\""], capitalizedTypes: false)
@@ -213,19 +218,38 @@ nonisolated enum SyntaxHighlighter {
     /// What carries from one line to the next: an open block comment or multi-line string.
     struct State: Equatable, Sendable {
         var inBlockComment = false
-        var openTripleQuote: String?
+        var openMultilineQuote: String?
     }
 
-    /// Tokens for a file's diff lines, or none when its language isn't recognized.
-    static func highlight(for file: DiffFile) -> [DiffLine.ID: [SyntaxToken]] {
-        guard let language = CodeLanguage.forPath(file.path) else { return [:] }
+    /// Tokens per line, kept per side: a context line can read differently on the old side
+    /// (inside a comment the change removed) than on the new side.
+    struct Highlighted: Sendable, Equatable {
+        var old: [DiffLine.ID: [SyntaxToken]] = [:]
+        var new: [DiffLine.ID: [SyntaxToken]] = [:]
+
+        /// For the unified view: removed lines as they were, everything else as it is now.
+        func unified(_ line: DiffLine) -> [SyntaxToken]? {
+            line.kind == .deletion ? old[line.id] : new[line.id]
+        }
+    }
+
+    /// Tokens for a file's diff, or none when its language isn't recognized.
+    static func highlight(for file: DiffFile) -> Highlighted {
+        guard let language = CodeLanguage.forPath(file.path) else { return Highlighted() }
         return highlight(file.hunks, language: language)
     }
 
-    /// Tokens for every line of a file's diff. The old and new sides are lexed separately, so a
-    /// comment opened on a removed line doesn't color the added lines (and vice versa).
-    static func highlight(_ hunks: [DiffHunk], language: CodeLanguage) -> [DiffLine.ID: [SyntaxToken]] {
-        var result: [DiffLine.ID: [SyntaxToken]] = [:]
+    /// The same, worked out off the main actor so large files don't stall scrolling.
+    @concurrent
+    static func highlightOffMain(_ file: DiffFile) async -> Highlighted {
+        highlight(for: file)
+    }
+
+    /// Lexes the old side (context and removed lines) and the new side (context and added
+    /// lines) separately, so a comment opened on one side doesn't color the other.
+    static func highlight(_ hunks: [DiffHunk], language: CodeLanguage) -> Highlighted {
+        let lexer = Lexer(language)
+        var result = Highlighted()
         for hunk in hunks {
             // Each hunk starts fresh: lines between hunks aren't in the diff.
             var old = State()
@@ -234,13 +258,12 @@ nonisolated enum SyntaxHighlighter {
                 let text = displayText(line.text)
                 switch line.kind {
                 case .addition:
-                    result[line.id] = tokens(in: text, language: language, state: &new)
+                    result.new[line.id] = lexer.tokens(in: text, state: &new)
                 case .deletion:
-                    result[line.id] = tokens(in: text, language: language, state: &old)
+                    result.old[line.id] = lexer.tokens(in: text, state: &old)
                 case .context:
-                    // Context lines are on both sides.
-                    result[line.id] = tokens(in: text, language: language, state: &new)
-                    _ = tokens(in: text, language: language, state: &old)
+                    result.new[line.id] = lexer.tokens(in: text, state: &new)
+                    result.old[line.id] = lexer.tokens(in: text, state: &old)
                 case .noNewline:
                     continue
                 }
@@ -255,140 +278,194 @@ nonisolated enum SyntaxHighlighter {
     }
 
     static func tokens(in text: String, language: CodeLanguage, state: inout State) -> [SyntaxToken] {
-        let chars = Array(text)
-        var tokens: [SyntaxToken] = []
-        var i = 0
+        Lexer(language).tokens(in: text, state: &state)
+    }
 
-        func matches(_ string: String, at index: Int) -> Bool {
-            let pattern = Array(string)
-            guard index + pattern.count <= chars.count else { return false }
-            return Array(chars[index..<index + pattern.count]) == pattern
+    /// The lexer for one language, with its patterns turned into character arrays once.
+    struct Lexer {
+        let language: CodeLanguage
+        private let lineComments: [[Character]]
+        private let blockOpen: [Character]?
+        private let blockClose: [Character]?
+        private let multiline: [(name: String, chars: [Character])]
+
+        init(_ language: CodeLanguage) {
+            self.language = language
+            lineComments = language.lineComments.map { Array($0) }
+            blockOpen = language.blockComment.map { Array($0.open) }
+            blockClose = language.blockComment.map { Array($0.close) }
+            multiline = language.multilineQuotes.map { (name: $0, chars: Array($0)) }
         }
 
-        func find(_ string: String, from index: Int) -> Int? {
-            var j = index
-            while j < chars.count {
-                if matches(string, at: j) { return j }
-                j += 1
+        func tokens(in text: String, state: inout State) -> [SyntaxToken] {
+            let chars = Array(text)
+            var tokens: [SyntaxToken] = []
+            var i = 0
+
+            func matches(_ pattern: [Character], at index: Int) -> Bool {
+                guard !pattern.isEmpty, index + pattern.count <= chars.count else { return false }
+                for offset in pattern.indices where chars[index + offset] != pattern[offset] { return false }
+                return true
             }
-            return nil
-        }
 
-        // Carry-over from the previous line.
-        if state.inBlockComment, let block = language.blockComment {
-            if let close = find(block.close, from: 0) {
-                let end = close + block.close.count
+            func find(_ pattern: [Character], from index: Int) -> Int? {
+                var j = index
+                while j + pattern.count <= chars.count {
+                    if matches(pattern, at: j) { return j }
+                    j += 1
+                }
+                return nil
+            }
+
+            // Carry-over from the previous line.
+            if state.inBlockComment, let close = blockClose {
+                guard let found = find(close, from: 0) else {
+                    return chars.isEmpty ? [] : [SyntaxToken(range: 0..<chars.count, kind: .comment)]
+                }
+                let end = found + close.count
                 tokens.append(SyntaxToken(range: 0..<end, kind: .comment))
                 state.inBlockComment = false
                 i = end
-            } else {
-                return chars.isEmpty ? [] : [SyntaxToken(range: 0..<chars.count, kind: .comment)]
-            }
-        } else if let triple = state.openTripleQuote {
-            if let close = find(triple, from: 0) {
-                let end = close + triple.count
+            } else if let open = state.openMultilineQuote {
+                let quote = Array(open)
+                guard let found = find(quote, from: 0) else {
+                    return chars.isEmpty ? [] : [SyntaxToken(range: 0..<chars.count, kind: .string)]
+                }
+                let end = found + quote.count
                 tokens.append(SyntaxToken(range: 0..<end, kind: .string))
-                state.openTripleQuote = nil
+                state.openMultilineQuote = nil
                 i = end
-            } else {
-                return chars.isEmpty ? [] : [SyntaxToken(range: 0..<chars.count, kind: .string)]
-            }
-        }
-
-        func isIdentifierStart(_ c: Character) -> Bool { c.isLetter || c == "_" || c == "$" }
-        func isIdentifier(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "$" }
-
-        lexing: while i < chars.count {
-            let c = chars[i]
-            if c.isWhitespace { i += 1; continue }
-
-            for prefix in language.lineComments where matches(prefix, at: i) {
-                tokens.append(SyntaxToken(range: i..<chars.count, kind: .comment))
-                break lexing
             }
 
-            if let block = language.blockComment, matches(block.open, at: i) {
-                if let close = find(block.close, from: i + block.open.count) {
-                    let end = close + block.close.count
-                    tokens.append(SyntaxToken(range: i..<end, kind: .comment))
-                    i = end
-                } else {
+            func isIdentifierStart(_ c: Character) -> Bool { c.isLetter || c == "_" || c == "$" }
+            func isIdentifier(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" || c == "$" }
+
+            lexing: while i < chars.count {
+                let c = chars[i]
+                if c.isWhitespace { i += 1; continue }
+
+                let commentAllowedHere = !language.commentNeedsSpaceBefore || i == 0 || chars[i - 1].isWhitespace
+                if commentAllowedHere, lineComments.contains(where: { matches($0, at: i) }) {
                     tokens.append(SyntaxToken(range: i..<chars.count, kind: .comment))
-                    state.inBlockComment = true
                     break lexing
                 }
-                continue
-            }
 
-            if let triple = language.tripleQuotes.first(where: { matches($0, at: i) }) {
-                if let close = find(triple, from: i + triple.count) {
-                    let end = close + triple.count
+                if let open = blockOpen, let close = blockClose, matches(open, at: i) {
+                    if let found = find(close, from: i + open.count) {
+                        let end = found + close.count
+                        tokens.append(SyntaxToken(range: i..<end, kind: .comment))
+                        i = end
+                    } else {
+                        tokens.append(SyntaxToken(range: i..<chars.count, kind: .comment))
+                        state.inBlockComment = true
+                        break lexing
+                    }
+                    continue
+                }
+
+                if let quote = multiline.first(where: { matches($0.chars, at: i) }) {
+                    if let found = find(quote.chars, from: i + quote.chars.count) {
+                        let end = found + quote.chars.count
+                        tokens.append(SyntaxToken(range: i..<end, kind: .string))
+                        i = end
+                    } else {
+                        tokens.append(SyntaxToken(range: i..<chars.count, kind: .string))
+                        state.openMultilineQuote = quote.name
+                        break lexing
+                    }
+                    continue
+                }
+
+                if language.quotes.contains(c) {
+                    var j = i + 1
+                    while j < chars.count, chars[j] != c {
+                        j += chars[j] == "\\" ? 2 : 1
+                    }
+                    let end = min(j + 1, chars.count)
                     tokens.append(SyntaxToken(range: i..<end, kind: .string))
                     i = end
-                } else {
-                    tokens.append(SyntaxToken(range: i..<chars.count, kind: .string))
-                    state.openTripleQuote = triple
-                    break lexing
+                    continue
                 }
-                continue
-            }
 
-            if language.quotes.contains(c) {
-                var j = i + 1
-                while j < chars.count, chars[j] != c {
-                    j += chars[j] == "\\" ? 2 : 1
+                if c.isNumber, i == 0 || !isIdentifier(chars[i - 1]) {
+                    let end = numberEnd(chars, from: i)
+                    tokens.append(SyntaxToken(range: i..<end, kind: .number))
+                    i = end
+                    continue
                 }
-                let end = min(j + 1, chars.count)
-                tokens.append(SyntaxToken(range: i..<end, kind: .string))
-                i = end
-                continue
-            }
 
-            if c.isNumber, i == 0 || !isIdentifier(chars[i - 1]) {
-                var j = i + 1
-                while j < chars.count, chars[j].isHexDigit || "xX._oObB".contains(chars[j]) { j += 1 }
-                tokens.append(SyntaxToken(range: i..<j, kind: .number))
-                i = j
-                continue
-            }
-
-            if let prefix = language.attributePrefix, c == prefix, i + 1 < chars.count, isIdentifierStart(chars[i + 1]) {
-                var j = i + 1
-                while j < chars.count, isIdentifier(chars[j]) { j += 1 }
-                let word = String(chars[i..<j])
-                tokens.append(SyntaxToken(range: i..<j, kind: language.keywords.contains(word) ? .keyword : .attribute))
-                i = j
-                continue
-            }
-
-            if let prefix = language.directivePrefix, c == prefix, i + 1 < chars.count, chars[i + 1].isLetter {
-                var j = i + 1
-                while j < chars.count, isIdentifier(chars[j]) { j += 1 }
-                tokens.append(SyntaxToken(range: i..<j, kind: .directive))
-                i = j
-                continue
-            }
-
-            if isIdentifierStart(c) {
-                var j = i + 1
-                while j < chars.count, isIdentifier(chars[j]) || (language.name == "Ruby" && chars[j] == "?") { j += 1 }
-                let word = String(chars[i..<j])
-                let isKeyword = language.caseInsensitiveKeywords
-                    ? language.keywords.contains(word.lowercased())
-                    : language.keywords.contains(word)
-                // `.keyword` after a dot is a member (`foo.default`), not a keyword.
-                let afterDot = i > 0 && chars[i - 1] == "."
-                if isKeyword && !afterDot {
-                    tokens.append(SyntaxToken(range: i..<j, kind: .keyword))
-                } else if language.capitalizedTypes, c.isUppercase, word.contains(where: \.isLowercase) {
-                    tokens.append(SyntaxToken(range: i..<j, kind: .type))
+                if let prefix = language.attributePrefix, c == prefix, i + 1 < chars.count, isIdentifierStart(chars[i + 1]) {
+                    var j = i + 1
+                    while j < chars.count, isIdentifier(chars[j]) { j += 1 }
+                    let word = String(chars[i..<j])
+                    tokens.append(SyntaxToken(range: i..<j, kind: language.keywords.contains(word) ? .keyword : .attribute))
+                    i = j
+                    continue
                 }
-                i = j
-                continue
-            }
 
-            i += 1
+                if let prefix = language.directivePrefix, c == prefix, i + 1 < chars.count,
+                   chars[i + 1].isLetter || chars[i + 1] == "[" {
+                    var j = i + 1
+                    if chars[j] == "[" {
+                        // Rust attributes: `#[derive(Debug)]`, up to the closing bracket.
+                        while j < chars.count, chars[j] != "]" { j += 1 }
+                        j = min(j + 1, chars.count)
+                    } else {
+                        while j < chars.count, isIdentifier(chars[j]) { j += 1 }
+                    }
+                    tokens.append(SyntaxToken(range: i..<j, kind: .directive))
+                    i = j
+                    continue
+                }
+
+                if isIdentifierStart(c) {
+                    var j = i + 1
+                    while j < chars.count, isIdentifier(chars[j]) { j += 1 }
+                    if j < chars.count, language.identifierSuffixes.contains(chars[j]) { j += 1 }
+                    let word = String(chars[i..<j])
+                    let isKeyword = language.caseInsensitiveKeywords
+                        ? language.keywords.contains(word.lowercased())
+                        : language.keywords.contains(word)
+                    // `.keyword` after a dot is a member (`foo.default`), not a keyword.
+                    let afterDot = i > 0 && chars[i - 1] == "."
+                    if isKeyword && !afterDot {
+                        tokens.append(SyntaxToken(range: i..<j, kind: .keyword))
+                    } else if language.capitalizedTypes, c.isUppercase, word.contains(where: \.isLowercase) {
+                        tokens.append(SyntaxToken(range: i..<j, kind: .type))
+                    }
+                    i = j
+                    continue
+                }
+
+                i += 1
+            }
+            return tokens
         }
-        return tokens
+
+        /// Decimal (`42`, `3.14`, `1_000`, `1e9`), hex (`0x1F`), octal and binary (`0o7`, `0b1`).
+        /// Stops before a range (`0..<n`) or a member (`1.description`).
+        private func numberEnd(_ chars: [Character], from start: Int) -> Int {
+            var j = start + 1
+            if chars[start] == "0", j < chars.count, "xXoObB".contains(chars[j]) {
+                j += 1
+                while j < chars.count, chars[j].isHexDigit || chars[j] == "_" { j += 1 }
+                return j
+            }
+            var seenDot = false
+            while j < chars.count {
+                let c = chars[j]
+                if c.isNumber || c == "_" {
+                    j += 1
+                } else if c == ".", !seenDot, j + 1 < chars.count, chars[j + 1].isNumber {
+                    seenDot = true
+                    j += 1
+                } else if c == "e" || c == "E", j + 1 < chars.count, chars[j + 1].isNumber {
+                    j += 1
+                } else {
+                    break
+                }
+            }
+            return j
+        }
     }
 }
