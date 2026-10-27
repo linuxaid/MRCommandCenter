@@ -6,6 +6,8 @@ struct UnifiedDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
     @State private var highlighted: DiffLine.ID?
+    /// Syntax colors per line, worked out once per file (#26).
+    @State private var syntax: [DiffLine.ID: [SyntaxToken]] = [:]
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -16,7 +18,7 @@ struct UnifiedDiffView: View {
                         HunkHeaderRow(hunk: hunk)
                         ForEach(hunk.lines) { line in
                             VStack(alignment: .leading, spacing: 0) {
-                                UnifiedLineRow(fileID: file.id, line: line, isHighlighted: highlighted == line.id)
+                                UnifiedLineRow(fileID: file.id, line: line, tokens: syntax[line.id], isHighlighted: highlighted == line.id)
                                 LineThreads(fileID: file.id, line: line)
                             }
                             .id(line.id)
@@ -27,6 +29,7 @@ struct UnifiedDiffView: View {
             }
             .onAppear { scroll(proxy, animated: false) }
             .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
+            .task(id: file.id) { syntax = SyntaxHighlighter.highlight(for: file) }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
@@ -53,6 +56,8 @@ struct UnifiedDiffView: View {
 struct SideBySideDiffView: View {
     let file: DiffFile
     var scrollRequest: ScrollRequest?
+    /// Syntax colors per line, worked out once per file (#26).
+    @State private var syntax: [DiffLine.ID: [SyntaxToken]] = [:]
     @State private var highlighted: SplitRow.ID?
 
     var body: some View {
@@ -65,9 +70,9 @@ struct SideBySideDiffView: View {
                     ForEach(SideBySide.rows(for: hunk)) { row in
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(alignment: .top, spacing: 0) {
-                                SplitCell(fileID: file.id, line: row.left, side: .old)
+                                SplitCell(fileID: file.id, line: row.left, side: .old, tokens: row.left.flatMap { syntax[$0.id] })
                                 Divider()
-                                SplitCell(fileID: file.id, line: row.right, side: .new)
+                                SplitCell(fileID: file.id, line: row.right, side: .new, tokens: row.right.flatMap { syntax[$0.id] })
                             }
                             if let left = row.left {
                                 LineThreads(fileID: file.id, line: left)
@@ -85,6 +90,7 @@ struct SideBySideDiffView: View {
         }
         .onAppear { scroll(proxy, animated: false) }
         .onChange(of: scrollRequest?.id) { scroll(proxy, animated: true) }
+            .task(id: file.id) { syntax = SyntaxHighlighter.highlight(for: file) }
         }
         .font(.system(.callout, design: .monospaced))
         .typesettingLanguage(.code)
@@ -122,6 +128,7 @@ private struct HunkHeaderRow: View {
 private struct UnifiedLineRow: View {
     let fileID: DiffFile.ID
     let line: DiffLine
+    var tokens: [SyntaxToken]?
     var isHighlighted = false
     @State private var isHovered = false
 
@@ -133,7 +140,7 @@ private struct UnifiedLineRow: View {
             Text(line.kind.marker)
                 .frame(width: 16)
                 .foregroundStyle(line.kind.markerColor)
-            Text(displayText(line))
+            Text(coloredText(line, tokens: tokens))
                 .foregroundStyle(line.kind == .noNewline ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -174,6 +181,7 @@ private struct SplitCell: View {
     let fileID: DiffFile.ID
     let line: DiffLine?
     let side: Side
+    var tokens: [SyntaxToken]?
     @State private var isHovered = false
 
     var body: some View {
@@ -187,7 +195,7 @@ private struct SplitCell: View {
             Text(line.map { $0.kind == .context ? " " : $0.kind.marker } ?? " ")
                 .frame(width: 16)
                 .foregroundStyle(line?.kind.markerColor ?? .clear)
-            Text(line.map(displayText) ?? "")
+            Text(line.map { coloredText($0, tokens: tokens) } ?? AttributedString())
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.trailing, 6)
@@ -238,7 +246,12 @@ private struct OptionalCommentActions: ViewModifier {
 
 /// Tabs expanded so indentation lines up.
 private func displayText(_ line: DiffLine) -> String {
-    line.text.replacingOccurrences(of: "\t", with: "    ")
+    SyntaxHighlighter.displayText(line.text)
+}
+
+/// The line with syntax colors when its language is known; plain otherwise.
+private func coloredText(_ line: DiffLine, tokens: [SyntaxToken]?) -> AttributedString {
+    SyntaxColors.attributed(displayText(line), tokens: tokens ?? [])
 }
 
 extension DiffLine.Kind {
