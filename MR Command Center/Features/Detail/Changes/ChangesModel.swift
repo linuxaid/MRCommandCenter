@@ -56,7 +56,9 @@ final class ChangesModel {
     /// Show the file list as folders (#31). The view sets its stored preference (on by default)
     /// before loading, so the first file selected is the tree's first.
     var showsTree = false {
-        didSet { revealSelection() }
+        // Only on a real switch: the view re-assigns it on every resize, and that mustn't
+        // reopen a folder the user closed.
+        didSet { if showsTree != oldValue { revealSelection() } }
     }
     /// Folders the user closed, by path.
     var collapsedFolders: Set<String> = []
@@ -80,7 +82,9 @@ final class ChangesModel {
     /// Opens the folders around the selected file, so the selection is never hidden.
     private func revealSelection() {
         guard showsTree, let selectedFileID else { return }
-        collapsedFolders.subtract(tree.folderPaths(containing: selectedFileID))
+        let hiding = collapsedFolders.intersection(tree.folderPaths(containing: selectedFileID))
+        // Leave the set alone when nothing changes, so the list isn't redrawn for nothing.
+        if !hiding.isEmpty { collapsedFolders.subtract(hiding) }
     }
 
     /// One-shot: cleared when the user moves to another file, so coming back to a file starts

@@ -179,6 +179,8 @@ struct FileTreeNavigationTests {
 
         #expect(model.collapsedFolders.contains(folder), "The folder closes")
         #expect(model.selectedFileID == file, "The file stays selected and its diff stays shown")
+        model.showsTree = true
+        #expect(model.collapsedFolders.contains(folder), "Re-applying the same setting (e.g. on resize) doesn't reopen it")
         model.toggleFolder(folder)
         #expect(model.collapsedFolders.isEmpty)
     }

@@ -129,7 +129,8 @@ struct ChangesView: View {
                     changesWidth = width
                     isCompact = width < 640
                     // The narrow layout's file menu is flat, so ↑/↓ follows GitLab's order there.
-                    model.showsTree = showsFileTree && !isCompact
+                    let shown = showsFileTree && !isCompact
+                    if model.showsTree != shown { model.showsTree = shown }
                 }
             }
             .focusable()
@@ -291,7 +292,8 @@ private struct DiffFileList: View {
                         ForEach(model.tree.rows(collapsed: model.collapsedFolders)) { row in
                             switch row.kind {
                             case .folder(let folder, let isExpanded):
-                                FolderRow(folder: folder, isExpanded: isExpanded, depth: row.depth) {
+                                FolderRow(path: folder.path, name: folder.name, fileCountText: folder.fileCountText,
+                                          isExpanded: isExpanded, depth: row.depth) {
                                     withAnimation(.easeOut(duration: 0.12)) { model.toggleFolder(folder.path) }
                                 }
                                 .selectionDisabled()
@@ -328,7 +330,11 @@ private struct DiffFileList: View {
                 guard let id else { return }
                 proxy.scrollTo(id)
             }
-            .onChange(of: showsTree, initial: true) { _, isOn in model.showsTree = isOn }
+            .onChange(of: showsTree, initial: true) { _, isOn in
+                if model.showsTree != isOn { model.showsTree = isOn }
+                // The rows were swapped but the selection didn't change: bring it back into view.
+                if let id = model.selectedFileID { proxy.scrollTo(id) }
+            }
         }
     }
 
@@ -343,7 +349,10 @@ private struct DiffFileList: View {
 private struct FolderRow: View {
     static let indent: CGFloat = 14
 
-    let folder: FileTree.Folder
+    // Just what's drawn: a whole `Folder` carries every file's diff, which is costly to compare.
+    let path: String
+    let name: String
+    let fileCountText: String
     let isExpanded: Bool
     let depth: Int
     let toggle: () -> Void
@@ -358,12 +367,12 @@ private struct FolderRow: View {
                     .frame(width: 10)
                 Image(systemName: isExpanded ? "folder" : "folder.fill")
                     .foregroundStyle(.secondary)
-                Text(folder.name)
+                Text(name)
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer(minLength: 4)
                 if !isExpanded {
-                    Text(folder.fileCountText)
+                    Text(fileCountText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -372,8 +381,8 @@ private struct FolderRow: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .help(folder.path)
-        .accessibilityLabel("Folder \(folder.path), \(isExpanded ? "open" : "closed")")
+        .help(path)
+        .accessibilityLabel("Folder \(path), \(isExpanded ? "open" : "closed")")
         .accessibilityHint(isExpanded ? "Closes the folder" : "Opens the folder")
     }
 }
