@@ -48,9 +48,45 @@ final class ChangesModel {
     }
 
     private(set) var phase: Phase = .idle
-    var selectedFileID: DiffFile.ID?
+    var selectedFileID: DiffFile.ID? {
+        didSet { revealSelection() }
+    }
     /// Large or collapsed files the user chose to show.
     var expandedFileIDs: Set<DiffFile.ID> = []
+    /// Show the file list as folders (#31). The view sets its stored preference (on by default)
+    /// before loading, so the first file selected is the tree's first.
+    var showsTree = false {
+        // Only on a real switch: the view re-assigns it on every resize, and that mustn't
+        // reopen a folder the user closed.
+        didSet { if showsTree != oldValue { revealSelection() } }
+    }
+    /// Folders the user closed, by path.
+    var collapsedFolders: Set<String> = []
+
+    /// The diff's files as a tree, rebuilt when the diff loads.
+    private(set) var tree = FileTree([])
+
+    /// The order ↑/↓ steps through: the tree's when it's shown, GitLab's otherwise.
+    var navigationOrder: [DiffFile.ID] {
+        showsTree ? tree.fileOrder : (diff?.files.map(\.id) ?? [])
+    }
+
+    func toggleFolder(_ path: String) {
+        if collapsedFolders.contains(path) {
+            collapsedFolders.remove(path)
+        } else {
+            collapsedFolders.insert(path)
+        }
+    }
+
+    /// Opens the folders around the selected file, so the selection is never hidden.
+    private func revealSelection() {
+        guard showsTree, let selectedFileID else { return }
+        let hiding = collapsedFolders.intersection(tree.folderPaths(containing: selectedFileID))
+        // Leave the set alone when nothing changes, so the list isn't redrawn for nothing.
+        if !hiding.isEmpty { collapsedFolders.subtract(hiding) }
+    }
+
     /// One-shot: cleared when the user moves to another file, so coming back to a file starts
     /// at its top instead of jumping to an old target again (#22).
     var scrollRequest: ScrollRequest?
@@ -68,13 +104,14 @@ final class ChangesModel {
     /// Moves the file selection up (negative) or down the list, stopping at either end.
     /// With nothing selected, down picks the first file and up the last.
     func moveFileSelection(by offset: Int) {
-        guard let files = diff?.files, !files.isEmpty else { return }
+        let files = navigationOrder
+        guard !files.isEmpty else { return }
         scrollRequest = nil
-        guard let index = files.firstIndex(where: { $0.id == selectedFileID }) else {
-            selectedFileID = offset > 0 ? files.first?.id : files.last?.id
+        guard let index = files.firstIndex(where: { $0 == selectedFileID }) else {
+            selectedFileID = offset > 0 ? files.first : files.last
             return
         }
-        selectedFileID = files[min(max(index + offset, 0), files.count - 1)].id
+        selectedFileID = files[min(max(index + offset, 0), files.count - 1)]
     }
 
     /// ↑/↓ in the Changes area. Returns false to leave the key alone: while a comment box is
@@ -100,9 +137,10 @@ final class ChangesModel {
         if diff == nil { phase = .loading }
         do {
             let diff = try await service.diff(for: mr, forceRefresh: forceRefresh)
+            tree = FileTree(diff.files)
             phase = .loaded(diff)
             if selectedFileID == nil || !diff.files.contains(where: { $0.id == selectedFileID }) {
-                selectedFileID = diff.files.first?.id
+                selectedFileID = navigationOrder.first
             }
         } catch is CancellationError {
             return

@@ -14,6 +14,8 @@ struct ChangesView: View {
     @State private var isCompact = false
     /// The file list's width as the user last left it; clamped to the room available.
     @AppStorage("fileListWidth") private var fileListWidth: Double = FileListWidth.standard
+    /// Folders (#31) or a flat list.
+    @AppStorage("fileListTree") private var showsFileTree = true
     /// The width while a drag is in progress; stored only when the drag ends.
     @State private var draggedFileListWidth: Double?
     @State private var changesWidth: CGFloat = 0
@@ -37,6 +39,9 @@ struct ChangesView: View {
             .environment(comments)
             .task(id: "\(mr.key)@\(mr.headSHA)") {
                 model = ChangesModel()
+                // Set before loading so the first file selected is the tree's first. The file list
+                // also keeps it in step afterwards (it doesn't exist until the diff has loaded).
+                model.showsTree = showsFileTree && !isCompact
                 comments = CommentsModel()
                 await model.load(mr, using: appModel.diffs)
                 applyNavigation()
@@ -107,9 +112,9 @@ struct ChangesView: View {
                         }
                     } else {
                         HStack(spacing: 0) {
-                            DiffFileList(diff: diff, placement: comments.placement,
+                            DiffFileList(diff: diff, model: model, placement: comments.placement,
                                          aiCounts: showsAIComments ? comments.openAICountsByFile : [:],
-                                         selection: $model.selectedFileID)
+                                         showsTree: $showsFileTree)
                                 .frame(width: FileListWidth.clamped(draggedFileListWidth ?? fileListWidth,
                                                                     available: changesWidth))
                             FileListResizeHandle(width: $fileListWidth, draggedWidth: $draggedFileListWidth,
@@ -123,6 +128,9 @@ struct ChangesView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                     changesWidth = width
                     isCompact = width < 640
+                    // The narrow layout's file menu is flat, so ↑/↓ follows GitLab's order there.
+                    let shown = showsFileTree && !isCompact
+                    if model.showsTree != shown { model.showsTree = shown }
                 }
             }
             .focusable()
@@ -269,34 +277,113 @@ private struct CommentsKey: Equatable {
 
 private struct DiffFileList: View {
     let diff: MRDiff
+    @Bindable var model: ChangesModel
     let placement: ThreadPlacement
     let aiCounts: [DiffFile.ID: Int]
-    @Binding var selection: DiffFile.ID?
+    @Binding var showsTree: Bool
 
     var body: some View {
         ScrollViewReader { proxy in
-            List(selection: $selection) {
+            // Ignore the list clearing the selection when its row is hidden in a closed folder:
+            // the file stays selected and shown.
+            List(selection: Binding(get: { model.selectedFileID }, set: { if let id = $0 { model.selectedFileID = id } })) {
                 Section {
-                    ForEach(diff.files) { file in
-                        let threads = placement.threads(for: file.id)
-                        DiffFileRow(file: file, threadCount: threads.count, unresolvedCount: threads.unresolvedCount,
-                                    aiCount: aiCounts[file.id] ?? 0)
-                            .tag(file.id)
+                    if showsTree {
+                        ForEach(model.tree.rows(collapsed: model.collapsedFolders)) { row in
+                            switch row.kind {
+                            case .folder(let folder, let isExpanded):
+                                FolderRow(path: folder.path, name: folder.name, fileCountText: folder.fileCountText,
+                                          isExpanded: isExpanded, depth: row.depth) {
+                                    withAnimation(.easeOut(duration: 0.12)) { model.toggleFolder(folder.path) }
+                                }
+                                .selectionDisabled()
+                            case .file(let file):
+                                fileRow(file, showsDirectory: false)
+                                    .padding(.leading, CGFloat(row.depth) * FolderRow.indent)
+                                    .tag(file.id)
+                            }
+                        }
+                    } else {
+                        ForEach(diff.files) { file in
+                            fileRow(file, showsDirectory: true)
+                                .tag(file.id)
+                        }
                     }
                 } header: {
                     HStack {
                         Text("\(diff.files.count) \(diff.files.count == 1 ? "file" : "files")")
                         Spacer()
                         DiffStat(additions: diff.additions, deletions: diff.deletions)
+                        Button {
+                            showsTree.toggle()
+                        } label: {
+                            Image(systemName: showsTree ? "list.bullet" : "list.bullet.indent")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(showsTree ? "Show as a flat list" : "Show folders")
+                        .accessibilityLabel(showsTree ? "Show as a flat list" : "Show folders")
                     }
                 }
             }
             // Keep the row in view when the arrow keys move the selection past the visible files.
-            .onChange(of: selection, initial: true) { _, id in
+            .onChange(of: model.selectedFileID, initial: true) { _, id in
                 guard let id else { return }
                 proxy.scrollTo(id)
             }
+            .onChange(of: showsTree, initial: true) { _, isOn in
+                if model.showsTree != isOn { model.showsTree = isOn }
+                // The rows were swapped but the selection didn't change: bring it back into view.
+                if let id = model.selectedFileID { proxy.scrollTo(id) }
+            }
         }
+    }
+
+    private func fileRow(_ file: DiffFile, showsDirectory: Bool) -> some View {
+        let threads = placement.threads(for: file.id)
+        return DiffFileRow(file: file, threadCount: threads.count, unresolvedCount: threads.unresolvedCount,
+                           aiCount: aiCounts[file.id] ?? 0, showsDirectory: showsDirectory)
+    }
+}
+
+/// A folder in the file tree: click to open or close it. A closed folder says how many files it holds.
+private struct FolderRow: View {
+    static let indent: CGFloat = 14
+
+    // Just what's drawn: a whole `Folder` carries every file's diff, which is costly to compare.
+    let path: String
+    let name: String
+    let fileCountText: String
+    let isExpanded: Bool
+    let depth: Int
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10)
+                Image(systemName: isExpanded ? "folder" : "folder.fill")
+                    .foregroundStyle(.secondary)
+                Text(name)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                Spacer(minLength: 4)
+                if !isExpanded {
+                    Text(fileCountText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, CGFloat(depth) * Self.indent)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(path)
+        .accessibilityLabel("Folder \(path), \(isExpanded ? "open" : "closed")")
+        .accessibilityHint(isExpanded ? "Closes the folder" : "Opens the folder")
     }
 }
 
@@ -374,6 +461,8 @@ private struct DiffFileRow: View {
     let threadCount: Int
     let unresolvedCount: Int
     let aiCount: Int
+    /// The flat list shows each file's folder; the tree already does.
+    var showsDirectory = true
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -386,7 +475,7 @@ private struct DiffFileRow: View {
                     .truncationMode(.middle)
                 // Directory and comment badges share the second line so the name keeps its room.
                 HStack(spacing: 6) {
-                    if !file.directory.isEmpty {
+                    if showsDirectory, !file.directory.isEmpty {
                         Text(file.directory)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
