@@ -4,16 +4,9 @@ import Foundation
 /// Folders that only hold one other folder are joined into one row (`src/main/java`), as
 /// GitHub and VS Code do, so deep paths don't waste levels. Pure, so it's tested directly.
 nonisolated struct FileTree: Sendable, Equatable {
-    indirect enum Node: Sendable, Equatable, Identifiable {
+    enum Node: Sendable, Equatable {
         case folder(Folder)
         case file(DiffFile)
-
-        var id: String {
-            switch self {
-            case .folder(let folder): "folder:" + folder.path
-            case .file(let file): "file:" + file.id
-            }
-        }
     }
 
     struct Folder: Sendable, Equatable {
@@ -22,6 +15,12 @@ nonisolated struct FileTree: Sendable, Equatable {
         /// What the row shows: the last part, or several joined (`src/main/java`).
         let name: String
         let children: [Node]
+
+        /// "3 files", shown on a closed folder.
+        var fileCountText: String {
+            let count = files.count
+            return count == 1 ? "1 file" : "\(count) files"
+        }
 
         /// Every file under this folder, at any depth.
         var files: [DiffFile] {
@@ -44,10 +43,12 @@ nonisolated struct FileTree: Sendable, Equatable {
         let kind: Kind
         let depth: Int
 
+        /// A file row's identity is its file's ID, so the list can scroll to the selected file.
+        /// File IDs look like `3:path`, so they never clash with `folder:` IDs.
         var id: String {
             switch kind {
             case .folder(let folder, _): "folder:" + folder.path
-            case .file(let file): "file:" + file.id
+            case .file(let file): file.id
             }
         }
     }

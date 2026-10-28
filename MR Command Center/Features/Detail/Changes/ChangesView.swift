@@ -39,7 +39,9 @@ struct ChangesView: View {
             .environment(comments)
             .task(id: "\(mr.key)@\(mr.headSHA)") {
                 model = ChangesModel()
-                model.showsTree = showsFileTree
+                // Set before loading so the first file selected is the tree's first. The file list
+                // also keeps it in step afterwards (it doesn't exist until the diff has loaded).
+                model.showsTree = showsFileTree && !isCompact
                 comments = CommentsModel()
                 await model.load(mr, using: appModel.diffs)
                 applyNavigation()
@@ -126,6 +128,8 @@ struct ChangesView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                     changesWidth = width
                     isCompact = width < 640
+                    // The narrow layout's file menu is flat, so ↑/↓ follows GitLab's order there.
+                    model.showsTree = showsFileTree && !isCompact
                 }
             }
             .focusable()
@@ -279,7 +283,9 @@ private struct DiffFileList: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            List(selection: $model.selectedFileID) {
+            // Ignore the list clearing the selection when its row is hidden in a closed folder:
+            // the file stays selected and shown.
+            List(selection: Binding(get: { model.selectedFileID }, set: { if let id = $0 { model.selectedFileID = id } })) {
                 Section {
                     if showsTree {
                         ForEach(model.tree.rows(collapsed: model.collapsedFolders)) { row in
@@ -357,8 +363,7 @@ private struct FolderRow: View {
                     .truncationMode(.head)
                 Spacer(minLength: 4)
                 if !isExpanded {
-                    let count = folder.files.count
-                    Text(count == 1 ? "1 file" : "\(count) files")
+                    Text(folder.fileCountText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

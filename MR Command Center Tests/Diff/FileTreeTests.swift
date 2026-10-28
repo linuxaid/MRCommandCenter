@@ -58,6 +58,26 @@ struct FileTreeTests {
         #expect(outline(tree, collapsed: ["a"]) == ["a/", "z"])
     }
 
+    @Test func fileRowsAreIdentifiedByTheirFileID() {
+        let all = files(["a/b/one", "two"])
+        let ids = FileTree(all).rows(collapsed: []).compactMap { row -> String? in
+            if case .file = row.kind { return row.id }
+            return nil
+        }
+        #expect(Set(ids) == Set(all.map(\.id)), "The list scrolls to the selection by file ID")
+    }
+
+    @Test func closedFolderCountsEveryFileInside() {
+        let tree = FileTree(files(["a/b/one", "a/b/two", "a/c", "z"]))
+        guard case .folder(let folder, _) = tree.rows(collapsed: ["a"]).first?.kind else {
+            Issue.record("Expected folder a"); return
+        }
+        #expect(folder.fileCountText == "3 files")
+        let single = FileTree(files(["x/only"]))
+        guard case .folder(let one, _) = single.rows(collapsed: []).first?.kind else { return }
+        #expect(one.fileCountText == "1 file")
+    }
+
     @Test func fileOrderFollowsTheTree() {
         let all = files(["z.txt", "b/two", "a/one"])
         let tree = FileTree(all)
@@ -148,11 +168,18 @@ struct FileTreeNavigationTests {
         #expect(model.selectedFileID == model.tree.fileOrder.first)
     }
 
-    @Test func togglingAFolder() async throws {
+    @Test func closingTheSelectedFilesFolderKeepsTheSelection() async throws {
         let model = try await loaded()
-        model.toggleFolder("app")
-        #expect(model.collapsedFolders == ["app"])
-        model.toggleFolder("app")
+        model.showsTree = true
+        let file = try #require(model.tree.fileOrder.first { !model.tree.folderPaths(containing: $0).isEmpty })
+        model.selectedFileID = file
+        let folder = try #require(model.tree.folderPaths(containing: file).first)
+
+        model.toggleFolder(folder)
+
+        #expect(model.collapsedFolders.contains(folder), "The folder closes")
+        #expect(model.selectedFileID == file, "The file stays selected and its diff stays shown")
+        model.toggleFolder(folder)
         #expect(model.collapsedFolders.isEmpty)
     }
 }
