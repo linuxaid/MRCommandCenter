@@ -416,6 +416,18 @@ private struct ReadinessChecklist: View {
     }
 
     private func row(_ step: ReadinessStep) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            summaryRow(step)
+            if step.kind == .pipeline {
+                PipelineControls(mr: mr)
+                    .padding(.leading, 30)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func summaryRow(_ step: ReadinessStep) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol(for: step.state))
                 .font(.system(size: 16, weight: .semibold))
@@ -436,8 +448,6 @@ private struct ReadinessChecklist: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
     }
 
@@ -475,6 +485,39 @@ private struct ReadinessChecklist: View {
             return parts.isEmpty ? nil : parts.joined(separator: " · ").capitalizedFirst
         case .mergeable:
             return mr.isDraft ? "Marked as a draft" : nil
+        }
+    }
+}
+
+/// Run or retry the MR's pipeline (#34), and why that failed if it did.
+private struct PipelineControls: View {
+    let mr: TrackedMR
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let center = appModel.commandCenter
+        let isBusy = center.pipelineKeys.contains(mr.key)
+        if let action = center.pipelineAction(for: mr) {
+            HStack(spacing: 6) {
+                Button {
+                    Task { await center.startPipeline(mr) }
+                } label: {
+                    Label(action.title, systemImage: action == .retry ? "arrow.clockwise" : "play.fill")
+                }
+                .controlSize(.small)
+                .disabled(isBusy)
+                .help(action == .retry ? "Rerun the failed jobs of pipeline #\(mr.pipelineID ?? 0)"
+                                       : "Start a new pipeline for commit \(mr.shortSHA)")
+                if isBusy {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        if let error = center.pipelineErrors[mr.key] {
+            Label(error, systemImage: "exclamationmark.octagon.fill")
+                .font(.caption)
+                .foregroundStyle(Theme.danger)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

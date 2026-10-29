@@ -147,6 +147,13 @@ nonisolated struct UpdateLabelsRequest: Encodable, Sendable, Equatable {
 }
 
 /// Body for `POST /projects/:id/merge_requests/:iid/approve`.
+/// A POST with nothing to send.
+nonisolated struct EmptyRequest: Encodable, Sendable, Equatable {}
+
+nonisolated struct CreatePipelineRequest: Encodable, Sendable, Equatable {
+    var ref: String
+}
+
 nonisolated struct ApproveRequest: Encodable, Sendable, Equatable {
     /// GitLab refuses the approval (409) if the head moved past this commit.
     var sha: String

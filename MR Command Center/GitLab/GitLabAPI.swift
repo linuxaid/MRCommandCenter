@@ -14,6 +14,12 @@ nonisolated protocol GitLabAPI: Sendable {
     /// All pages.
     func discussions(projectID: Int, iid: Int) async throws -> [GitLabDiscussion]
     func pipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline
+    /// Reruns a pipeline's failed and canceled jobs. Requires the `api` scope.
+    func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline
+    /// Starts a merge request pipeline for the MR's latest commit. Requires the `api` scope.
+    func createMergeRequestPipeline(projectID: Int, iid: Int) async throws -> GitLabPipeline
+    /// Starts a branch pipeline. Requires the `api` scope.
+    func createPipeline(projectID: Int, ref: String) async throws -> GitLabPipeline
     /// Per-file diffs for the MR's latest version. All pages.
     func diffs(projectID: Int, iid: Int) async throws -> [GitLabDiff]
     /// A file's raw content at a commit (used by the AI review's file-reading tool).

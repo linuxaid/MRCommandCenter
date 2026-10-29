@@ -80,6 +80,10 @@ final class CommandCenter {
     private(set) var mergingKeys: Set<String> = []
     /// The last approve/merge failure per MR, shown in its brief until the next attempt.
     private(set) var actionErrors: [String: String] = [:]
+    /// MRs with a pipeline retry or start in flight (#34).
+    private(set) var pipelineKeys: Set<String> = []
+    /// The last pipeline retry/start failure per MR, shown under the pipeline until the next attempt.
+    private(set) var pipelineErrors: [String: String] = [:]
     /// The MR waiting for you to confirm a merge (drives the merge sheet).
     var mergeDraft: MergeDraft?
     /// The MR whose labels are being edited (drives the label picker, opened with I).
@@ -326,6 +330,75 @@ final class CommandCenter {
                 mr.approvalsGiven = max(0, mr.approvalsGiven - 1)
             }
             self.store.record(.init(kind: .approvalRevoked, message: "You removed your approval"), for: mr)
+        }
+    }
+
+    // MARK: Pipelines (#34)
+
+    enum PipelineAction: Equatable {
+        case run, retry
+
+        var title: String { self == .run ? "Run Pipeline" : "Retry Pipeline" }
+    }
+
+    /// What the pipeline button offers: retry a failed or canceled pipeline of the latest commit,
+    /// start one when there's none (or the last one finished or is for an older commit), and
+    /// nothing while one is going.
+    nonisolated static func pipelineAction(status: PipelineStatus?, isForHead: Bool) -> PipelineAction? {
+        guard let status else { return .run }
+        if status.isActive { return nil }
+        switch status {
+        case .failed, .canceled: return isForHead ? .retry : .run
+        default: return .run
+        }
+    }
+
+    func pipelineAction(for mr: TrackedMR) -> PipelineAction? {
+        Self.pipelineAction(status: mr.pipelineID == nil ? nil : mr.pipelineStatus,
+                            isForHead: mr.pipelineSHA == nil || mr.pipelineSHA == mr.headSHA)
+    }
+
+    /// Retries the MR's pipeline, or starts a new one: a merge request pipeline, or a branch
+    /// pipeline when the project's CI doesn't run those.
+    func startPipeline(_ mr: TrackedMR) async {
+        guard let action = pipelineAction(for: mr), !pipelineKeys.contains(mr.key) else { return }
+        pipelineKeys.insert(mr.key)
+        defer { pipelineKeys.remove(mr.key) }
+        pipelineErrors[mr.key] = nil
+        do {
+            let client = try dependencies.gitLabClient(settings: settings)
+            let pipeline: GitLabPipeline
+            if action == .retry, let pipelineID = mr.pipelineID {
+                pipeline = try await client.retryPipeline(projectID: mr.projectID, pipelineID: pipelineID)
+            } else {
+                do {
+                    pipeline = try await client.createMergeRequestPipeline(projectID: mr.projectID, iid: mr.iid)
+                } catch APIError.server(let status) where status == 400 || status == 422 {
+                    pipeline = try await client.createPipeline(projectID: mr.projectID, ref: mr.sourceBranch)
+                }
+            }
+            mr.apply(pipeline: pipeline)
+            store.record(.init(kind: .other, message: action == .retry ? "You retried the pipeline" : "You started a pipeline"),
+                         for: mr)
+            save()
+        } catch {
+            pipelineErrors[mr.key] = Self.describePipelineFailure(error)
+            Log.sync.error("Pipeline action failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func describePipelineFailure(_ error: any Error) -> String {
+        switch error as? APIError {
+        case .forbidden?:
+            "GitLab refused (403). Running pipelines needs a token with the api scope and Developer access to the project."
+        case .unauthorized?:
+            "GitLab refused (401). Check your GitLab token in Settings."
+        case .notFound?:
+            "GitLab couldn't find the pipeline (404). Refresh and try again."
+        case .server(let status)? where status == 400 || status == 422:
+            "GitLab couldn't start a pipeline (\(status)). The project's CI may not run for this branch."
+        default:
+            error.localizedDescription
         }
     }
 
