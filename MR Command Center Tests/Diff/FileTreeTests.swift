@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import MR_Command_Center
 
@@ -100,6 +101,78 @@ struct FileTreeTests {
     }
 }
 
+/// The arrow keys in the tree (#33), as a pure function of the tree and its closed folders.
+struct FileTreeStepTests {
+    // a/
+    //   b/
+    //     one
+    //     two
+    //   c
+    // z
+    private let tree = FileTree(["a/b/one", "a/b/two", "a/c", "z"].enumerated().map { index, path in
+        DiffFile(GitLabDiff(oldPath: path, newPath: path, diff: "@@ -1 +1 @@\n-a\n+b",
+                            newFile: false, renamedFile: false, deletedFile: false), index: index)
+    })
+
+    private func file(_ path: String) -> FileTree.Cursor {
+        .file(tree.fileOrder.first { $0.hasSuffix(":" + path) }!)
+    }
+
+    @Test func downAndUpStopOnFolders() {
+        #expect(tree.step(.down, from: .folder("a"), collapsed: []) == .moveTo(.folder("a/b")))
+        #expect(tree.step(.down, from: .folder("a/b"), collapsed: []) == .moveTo(file("a/b/one")))
+        #expect(tree.step(.up, from: file("a/c"), collapsed: []) == .moveTo(file("a/b/two")))
+        #expect(tree.step(.down, from: .folder("a/b"), collapsed: ["a/b"]) == .moveTo(file("a/c")),
+                "A closed folder's files are skipped")
+    }
+
+    @Test func stopsAtEitherEnd() {
+        #expect(tree.step(.up, from: .folder("a"), collapsed: []) == .none)
+        #expect(tree.step(.down, from: file("z"), collapsed: []) == .none)
+    }
+
+    @Test func withNothingSelectedDownPicksTheFirstRowAndUpTheLast() {
+        #expect(tree.step(.down, from: nil, collapsed: []) == .moveTo(.folder("a")))
+        #expect(tree.step(.up, from: nil, collapsed: []) == .moveTo(file("z")))
+        #expect(tree.step(.left, from: nil, collapsed: []) == .none)
+    }
+
+    @Test func leftClosesAnOpenFolder() {
+        #expect(tree.step(.left, from: .folder("a/b"), collapsed: []) == .close("a/b"))
+    }
+
+    @Test func leftOnAFileClosesItsFolder() {
+        #expect(tree.step(.left, from: file("a/b/two"), collapsed: []) == .close("a/b"))
+        #expect(tree.step(.left, from: file("a/c"), collapsed: []) == .close("a"))
+    }
+
+    @Test func leftOnAClosedFolderMovesToTheFolderAbove() {
+        #expect(tree.step(.left, from: .folder("a/b"), collapsed: ["a/b"]) == .moveTo(.folder("a")))
+        #expect(tree.step(.left, from: .folder("a"), collapsed: ["a"]) == .none)
+        #expect(tree.step(.left, from: file("z"), collapsed: []) == .none, "Nothing above a top-level file")
+    }
+
+    @Test func rightOpensAClosedFolderThenStepsIn() {
+        #expect(tree.step(.right, from: .folder("a"), collapsed: ["a"]) == .open("a"))
+        #expect(tree.step(.right, from: .folder("a"), collapsed: []) == .moveTo(.folder("a/b")))
+        #expect(tree.step(.right, from: .folder("a/b"), collapsed: []) == .moveTo(file("a/b/one")))
+        #expect(tree.step(.right, from: file("a/c"), collapsed: []) == .none)
+    }
+
+    @Test func aHiddenSelectionStartsFromTheClosedFolderShowingIt() {
+        #expect(tree.step(.right, from: file("a/b/one"), collapsed: ["a"]) == .open("a"))
+        #expect(tree.step(.down, from: file("a/b/one"), collapsed: ["a"]) == .moveTo(file("z")))
+        #expect(tree.step(.up, from: .folder("a/b"), collapsed: ["a"]) == .moveTo(.folder("a")),
+                "Up from a hidden folder lands on the closed folder it's in")
+    }
+
+    @Test func rowIDsRoundTrip() {
+        for cursor in [FileTree.Cursor.folder("a/b"), file("a/c")] {
+            #expect(FileTree.Cursor(rowID: cursor.rowID) == cursor)
+        }
+    }
+}
+
 /// ↑/↓ and selection with the tree shown.
 @MainActor
 struct FileTreeNavigationTests {
@@ -115,15 +188,96 @@ struct FileTreeNavigationTests {
 
     private func name(_ model: ChangesModel) -> String? { model.selectedFile?.path }
 
-    @Test func arrowsFollowTheTreeOrder() async throws {
+    @Test func arrowsWalkEveryRowFoldersIncluded() async throws {
         let model = try await loaded()
         model.showsTree = true
-        let expected = model.tree.fileOrder
-        model.selectedFileID = expected.first
-        for id in expected.dropFirst() {
+        let rows = model.tree.rows(collapsed: [])
+        model.selectedFileID = nil
+        for row in rows {
             model.moveFileSelection(by: 1)
-            #expect(model.selectedFileID == id)
+            #expect(model.cursor == row.cursor)
         }
+        #expect(model.selectedFileID == model.tree.fileOrder.last)
+    }
+
+    @Test func aFolderRowKeepsTheFileShown() async throws {
+        let model = try await loaded()
+        model.showsTree = true
+        let rows = model.tree.rows(collapsed: [])
+        let fileIndex = try #require(rows.firstIndex { if case .file = $0.kind { $0.depth > 0 } else { false } })
+        guard case .file(let file) = rows[fileIndex].kind else { return }
+        model.selectedFileID = file.id
+
+        model.moveFileSelection(by: -1)
+
+        #expect(model.focusedFolder != nil, "The row above a folder's first file is the folder")
+        #expect(model.selectedFileID == file.id, "Its diff stays shown")
+        model.moveFileSelection(by: 1)
+        #expect(model.focusedFolder == nil)
+        #expect(model.cursor == .file(file.id))
+    }
+
+    @Test func leftClosesTheFilesFolderAndRightOpensIt() async throws {
+        let model = try await loaded()
+        model.showsTree = true
+        let file = try #require(model.tree.fileOrder.first { !model.tree.folderPaths(containing: $0).isEmpty })
+        let folder = try #require(model.tree.folderPaths(containing: file).last)
+        model.selectedFileID = file
+
+        #expect(model.handleSideArrow(opens: false, modifiers: [.function, .numericPad], isComposing: false))
+        #expect(model.collapsedFolders.contains(folder))
+        #expect(model.cursor == .folder(folder))
+        #expect(model.selectedFileID == file, "Closing the folder keeps the file's diff")
+
+        #expect(model.handleSideArrow(opens: true, modifiers: [], isComposing: false))
+        #expect(!model.collapsedFolders.contains(folder))
+        #expect(model.cursor == .folder(folder))
+        model.handleSideArrow(opens: true, modifiers: [], isComposing: false)
+        #expect(model.cursor != .folder(folder), "→ on an open folder steps into it")
+    }
+
+    @Test func sideArrowsAreLeftAloneInTheFlatListAndWhileComposing() async throws {
+        let model = try await loaded()
+        model.showsTree = false
+        #expect(!model.handleSideArrow(opens: false, modifiers: [], isComposing: false))
+        model.showsTree = true
+        #expect(!model.handleSideArrow(opens: false, modifiers: [], isComposing: true))
+        #expect(!model.handleSideArrow(opens: false, modifiers: [.command], isComposing: false))
+        #expect(model.collapsedFolders.isEmpty)
+    }
+
+    @Test func clickingAFolderRowTakesTheKeyboard() async throws {
+        let model = try await loaded()
+        model.showsTree = true
+        let file = try #require(model.selectedFileID)
+        let folder = try #require(model.tree.allFolderPaths.sorted().first)
+
+        model.select(rowID: FileTree.Cursor.folder(folder).rowID)
+        #expect(model.cursor == .folder(folder))
+        #expect(model.selectedFileID == file)
+
+        model.select(rowID: file)
+        #expect(model.cursor == .file(file))
+    }
+
+    @Test func clickingAFolderOpenOrClosedTakesTheKeyboard() async throws {
+        let model = try await loaded()
+        model.showsTree = true
+        let file = try #require(model.selectedFileID)
+        let folder = try #require(model.tree.allFolderPaths.sorted().last)
+
+        model.toggleFolder(folder)
+
+        #expect(model.cursor == .folder(folder))
+        #expect(model.selectedFileID == file)
+    }
+
+    @Test func switchingToTheFlatListDropsTheFolderCursor() async throws {
+        let model = try await loaded()
+        model.showsTree = true
+        model.focusedFolder = model.tree.allFolderPaths.first
+        model.showsTree = false
+        #expect(model.focusedFolder == nil)
     }
 
     @Test func flatListKeepsGitLabsOrder() async throws {

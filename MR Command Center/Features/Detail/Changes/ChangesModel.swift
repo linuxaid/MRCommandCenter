@@ -49,8 +49,14 @@ final class ChangesModel {
 
     private(set) var phase: Phase = .idle
     var selectedFileID: DiffFile.ID? {
-        didSet { revealSelection() }
+        didSet {
+            focusedFolder = nil
+            revealSelection()
+        }
     }
+    /// The folder row the keyboard is on (#33). While it's set, the selected file's diff stays
+    /// shown; nil means the keyboard is on the selected file.
+    var focusedFolder: String?
     /// Large or collapsed files the user chose to show.
     var expandedFileIDs: Set<DiffFile.ID> = []
     /// Show the file list as folders (#31). The view sets its stored preference (on by default)
@@ -58,7 +64,11 @@ final class ChangesModel {
     var showsTree = false {
         // Only on a real switch: the view re-assigns it on every resize, and that mustn't
         // reopen a folder the user closed.
-        didSet { if showsTree != oldValue { revealSelection() } }
+        didSet {
+            guard showsTree != oldValue else { return }
+            focusedFolder = nil
+            revealSelection()
+        }
     }
     /// Folders the user closed, by path.
     var collapsedFolders: Set<String> = []
@@ -71,7 +81,22 @@ final class ChangesModel {
         showsTree ? tree.fileOrder : (diff?.files.map(\.id) ?? [])
     }
 
+    /// The row the list highlights: the focused folder, or else the selected file.
+    var cursor: FileTree.Cursor? {
+        if let focusedFolder { return .folder(focusedFolder) }
+        return selectedFileID.map { .file($0) }
+    }
+
+    /// Clicking a row: a file selects it, a folder takes the keyboard.
+    func select(rowID: String) {
+        switch FileTree.Cursor(rowID: rowID) {
+        case .file(let id): selectedFileID = id
+        case .folder(let path): focusedFolder = path
+        }
+    }
+
     func toggleFolder(_ path: String) {
+        focusedFolder = path
         if collapsedFolders.contains(path) {
             collapsedFolders.remove(path)
         } else {
@@ -101,9 +126,14 @@ final class ChangesModel {
         return true
     }
 
-    /// Moves the file selection up (negative) or down the list, stopping at either end.
-    /// With nothing selected, down picks the first file and up the last.
+    /// Moves up (negative) or down the list, stopping at either end. With nothing selected,
+    /// down picks the first row and up the last. In the tree, folder rows are stops too (#33).
     func moveFileSelection(by offset: Int) {
+        if showsTree {
+            guard diff != nil else { return }
+            apply(tree.step(offset > 0 ? .down : .up, from: cursor, collapsed: collapsedFolders))
+            return
+        }
         let files = navigationOrder
         guard !files.isEmpty else { return }
         scrollRequest = nil
@@ -124,6 +154,33 @@ final class ChangesModel {
         return true
     }
 
+    /// ←/→ in the Changes area close and open folders in the tree (#33). Returns false to
+    /// leave the key alone, under the same rules as ↑/↓, and in the flat list.
+    func handleSideArrow(opens: Bool, modifiers: EventModifiers, isComposing: Bool) -> Bool {
+        let held = modifiers.intersection([.command, .option, .shift, .control])
+        guard held.isEmpty, !isComposing, diff != nil, showsTree else { return false }
+        apply(tree.step(opens ? .right : .left, from: cursor, collapsed: collapsedFolders))
+        return true
+    }
+
+    private func apply(_ step: FileTree.Step) {
+        switch step {
+        case .moveTo(.file(let id)):
+            scrollRequest = nil
+            selectedFileID = id
+        case .moveTo(.folder(let path)):
+            focusedFolder = path
+        case .open(let path):
+            collapsedFolders.remove(path)
+            focusedFolder = path
+        case .close(let path):
+            collapsedFolders.insert(path)
+            focusedFolder = path
+        case .none:
+            break
+        }
+    }
+
     var diff: MRDiff? {
         if case .loaded(let diff) = phase { return diff }
         return nil
@@ -138,6 +195,7 @@ final class ChangesModel {
         do {
             let diff = try await service.diff(for: mr, forceRefresh: forceRefresh)
             tree = FileTree(diff.files)
+            if let focusedFolder, !tree.allFolderPaths.contains(focusedFolder) { self.focusedFolder = nil }
             phase = .loaded(diff)
             if selectedFileID == nil || !diff.files.contains(where: { $0.id == selectedFileID }) {
                 selectedFileID = navigationOrder.first
