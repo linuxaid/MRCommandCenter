@@ -354,7 +354,10 @@ final class CommandCenter {
     }
 
     func pipelineAction(for mr: TrackedMR) -> PipelineAction? {
-        Self.pipelineAction(status: mr.pipelineID == nil ? nil : mr.pipelineStatus,
+        // Until the details arrive, "no pipeline" only means "not loaded yet": GitLab may have
+        // one running, and a click would start a second.
+        guard mr.hasLoadedDetails || mr.pipelineStatusRaw != nil else { return nil }
+        return Self.pipelineAction(status: mr.pipelineID == nil ? nil : mr.pipelineStatus,
                             isForHead: mr.pipelineSHA == nil || mr.pipelineSHA == mr.headSHA)
     }
 

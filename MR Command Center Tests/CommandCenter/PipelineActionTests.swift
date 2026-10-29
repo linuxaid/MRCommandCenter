@@ -57,9 +57,10 @@ struct PipelineActionTests {
         #expect(none.pipelineSHA == none.headSHA)
     }
 
-    @Test func fallsBackToABranchPipelineWhenTheProjectHasNoMRPipelines() async throws {
+    @Test(arguments: [400, 422])
+    func fallsBackToABranchPipelineWhenTheProjectHasNoMRPipelines(status: Int) async throws {
         let (app, spy) = await loaded()
-        spy.edit { $0.mergeRequestPipelineFailure = .server(status: 400) }
+        spy.edit { $0.mergeRequestPipelineFailure = .server(status: status) }
         let passed = try mr(app, 412)
 
         await app.commandCenter.startPipeline(passed)
@@ -81,6 +82,27 @@ struct PipelineActionTests {
         let error = try #require(app.commandCenter.pipelineErrors[failed.key])
         #expect(error.contains("api scope"))
         #expect(app.commandCenter.actionErrors[failed.key] == nil, "Kept apart from approve/merge errors")
+        #expect(try messages(app, failed).filter { $0.contains("pipeline") }.isEmpty, "Nothing recorded")
+    }
+
+    @Test func nothingIsOfferedBeforeTheDetailsLoad() async throws {
+        let (app, _) = await loaded()
+        let none = try mr(app, 1884)
+        none.detailsFetchedForUpdatedAt = nil
+        #expect(app.commandCenter.pipelineAction(for: none) == nil, "GitLab may already have one running")
+    }
+
+    @Test func aFailedPipelineOfAnOlderCommitStartsANewOne() async throws {
+        let (app, spy) = await loaded()
+        let failed = try mr(app, 1873)
+        failed.pipelineSHA = "0123456789abcdef"
+        #expect(app.commandCenter.pipelineAction(for: failed) == .run)
+
+        await app.commandCenter.startPipeline(failed)
+
+        #expect(spy.count("retryPipeline") == 0)
+        #expect(spy.count("createMergeRequestPipeline") == 1)
+        #expect(failed.pipelineSHA == failed.headSHA)
     }
 
     @Test func otherErrorsDontFallBack() async throws {
@@ -100,8 +122,14 @@ struct PipelineActionTests {
 
         await app.commandCenter.startPipeline(failed)
 
-        let events = try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
-        let messages = events.filter { $0.mrKey == failed.key }.map(\.message)
-        #expect(messages.contains("You retried the pipeline"))
+        #expect(try messages(app, failed).contains("You retried the pipeline"))
+        let none = try mr(app, 1884)
+        await app.commandCenter.startPipeline(none)
+        #expect(try messages(app, none).contains("You started a pipeline"))
+    }
+
+    private func messages(_ app: AppModel, _ mr: TrackedMR) throws -> [String] {
+        try app.modelContainer.mainContext.fetch(FetchDescriptor<ActivityEvent>())
+            .filter { $0.mrKey == mr.key }.map(\.message)
     }
 }

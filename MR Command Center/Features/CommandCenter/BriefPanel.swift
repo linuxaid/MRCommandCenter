@@ -513,7 +513,8 @@ private struct PipelineControls: View {
                 }
             }
         }
-        if let error = center.pipelineErrors[mr.key] {
+        // Only beside the button: once a pipeline is going (started in GitLab, say), the old error is moot.
+        if center.pipelineAction(for: mr) != nil, let error = center.pipelineErrors[mr.key] {
             Label(error, systemImage: "exclamationmark.octagon.fill")
                 .font(.caption)
                 .foregroundStyle(Theme.danger)

@@ -146,14 +146,15 @@ nonisolated struct UpdateLabelsRequest: Encodable, Sendable, Equatable {
     var removeLabels: String?
 }
 
-/// Body for `POST /projects/:id/merge_requests/:iid/approve`.
 /// A POST with nothing to send.
 nonisolated struct EmptyRequest: Encodable, Sendable, Equatable {}
 
+/// Body for `POST /projects/:id/pipeline`.
 nonisolated struct CreatePipelineRequest: Encodable, Sendable, Equatable {
     var ref: String
 }
 
+/// Body for `POST /projects/:id/merge_requests/:iid/approve`.
 nonisolated struct ApproveRequest: Encodable, Sendable, Equatable {
     /// GitLab refuses the approval (409) if the head moved past this commit.
     var sha: String
