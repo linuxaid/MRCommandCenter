@@ -14,6 +14,10 @@ nonisolated protocol GitLabAPI: Sendable {
     /// All pages.
     func discussions(projectID: Int, iid: Int) async throws -> [GitLabDiscussion]
     func pipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline
+    /// The pipeline's failed jobs (the latest try of each). All pages.
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob]
+    /// A job's log, as raw terminal output.
+    func jobLog(projectID: Int, jobID: Int) async throws -> String
     /// Reruns a pipeline's failed and canceled jobs. Requires the `api` scope.
     func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline
     /// Starts a merge request pipeline for the MR's latest commit. Requires the `api` scope.

@@ -30,6 +30,10 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         /// Fails only merge request pipelines, like a project whose CI has no MR pipelines.
         var mergeRequestPipelineFailure: APIError?
         var pipelineRefs: [String] = []
+        var jobsFailure: APIError?
+        var jobLogFailure: APIError?
+        /// Replaces every job log, to test cleaning and trimming.
+        var jobLogOverride: String?
     }
 
     let state = Mutex(State())
@@ -186,6 +190,20 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         let note = try await client.replyToDiscussion(projectID: projectID, iid: iid, discussionID: discussionID, body: body)
         edit { $0.data = client.data }
         return note
+    }
+
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
+        record("failedJobs")
+        if let failure = state.withLock({ $0.jobsFailure }) { throw failure }
+        return try await mock.failedJobs(projectID: projectID, pipelineID: pipelineID)
+    }
+
+    func jobLog(projectID: Int, jobID: Int) async throws -> String {
+        record("jobLog")
+        let (failure, override) = state.withLock { ($0.jobLogFailure, $0.jobLogOverride) }
+        if let failure { throw failure }
+        if let override { return override }
+        return try await mock.jobLog(projectID: projectID, jobID: jobID)
     }
 
     func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {

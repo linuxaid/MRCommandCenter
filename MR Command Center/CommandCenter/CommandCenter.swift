@@ -353,6 +353,11 @@ final class CommandCenter {
         }
     }
 
+    /// A client for reads the brief does itself, like failed jobs' logs (#35).
+    func gitLabClient() throws -> any GitLabAPI {
+        try dependencies.gitLabClient(settings: settings)
+    }
+
     func pipelineAction(for mr: TrackedMR) -> PipelineAction? {
         // Until the details arrive, "no pipeline" only means "not loaded yet": GitLab may have
         // one running, and a click would start a second.

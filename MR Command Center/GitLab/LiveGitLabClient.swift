@@ -63,6 +63,16 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
         try await http.get(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)", decoder: .gitLab)
     }
 
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
+        try await allPages(GitLabJob.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)/jobs",
+                           query: [URLQueryItem(name: "scope[]", value: "failed")])
+    }
+
+    func jobLog(projectID: Int, jobID: Int) async throws -> String {
+        let request = try http.makeRequest(path: "/api/v4/projects/\(projectID)/jobs/\(jobID)/trace")
+        return String(decoding: try await http.send(request).data, as: UTF8.self)
+    }
+
     func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
         try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)/retry",
                             body: EmptyRequest(), decoder: .gitLab)
