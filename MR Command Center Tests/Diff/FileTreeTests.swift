@@ -260,6 +260,18 @@ struct FileTreeNavigationTests {
         #expect(model.cursor == .file(file))
     }
 
+    @Test func clickingAFolderOpenOrClosedTakesTheKeyboard() async throws {
+        let model = try await loaded()
+        model.showsTree = true
+        let file = try #require(model.selectedFileID)
+        let folder = try #require(model.tree.allFolderPaths.sorted().last)
+
+        model.toggleFolder(folder)
+
+        #expect(model.cursor == .folder(folder))
+        #expect(model.selectedFileID == file)
+    }
+
     @Test func switchingToTheFlatListDropsTheFolderCursor() async throws {
         let model = try await loaded()
         model.showsTree = true

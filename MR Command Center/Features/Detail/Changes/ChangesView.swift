@@ -148,8 +148,11 @@ struct ChangesView: View {
                 let isComposing = comments.activeTarget != nil
                 let handled = switch press.key {
                 case .leftArrow, .rightArrow:
-                    model.handleSideArrow(opens: press.key == .rightArrow, modifiers: press.modifiers,
-                                          isComposing: isComposing)
+                    // Animated like a click on the folder.
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        model.handleSideArrow(opens: press.key == .rightArrow, modifiers: press.modifiers,
+                                              isComposing: isComposing)
+                    }
                 default:
                     model.handleArrow(by: press.key == .downArrow ? 1 : -1, modifiers: press.modifiers,
                                       isComposing: isComposing)
