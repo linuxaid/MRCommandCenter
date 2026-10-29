@@ -52,6 +52,7 @@ nonisolated enum MockPipelineJobs {
             "    > 43 |     expect(attempts).toBe(5)",
             "         |                      ^",
             "",
+            "    at retry (dist/bundle.min.js:1:" + String(repeating: "a.b(c);", count: 600) + ")",
             "Tests:       1 failed, 41 passed, 42 total",
             "section_end:1730000060:step_script\r\(esc)[0K\(esc)[31;1mERROR: Job failed: exit code 1\(esc)[0;m",
             "",

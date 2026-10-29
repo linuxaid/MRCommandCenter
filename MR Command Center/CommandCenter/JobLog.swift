@@ -9,6 +9,8 @@ nonisolated enum JobLog {
     /// Extra raw lines cleaned beyond the tail, to make up for the ones cleaning drops
     /// (section markers, trailing blank lines).
     private static let slack = 50
+    /// Longer lines (minified code, JSON dumps) are cut, so the log view stays a sane width.
+    static let maxLineLength = 2_000
 
     /// The log as plain lines, the way GitLab's log viewer shows them.
     static func lines(_ raw: String) -> [String] {
@@ -50,6 +52,7 @@ nonisolated enum JobLog {
             line = line.replacing(sectionMarker, with: "")
             // A line that was only a section marker isn't shown at all, as in GitLab.
             if hadMarker, line.isEmpty { continue }
+            if line.count > maxLineLength { line = line.prefix(maxLineLength) + "…" }
             lines.append(line)
         }
         // Trailing blank lines are just the log's final newlines.
@@ -88,7 +91,8 @@ nonisolated enum JobLog {
             case "(", ")", "*", "+":
                 index += 2
             default:
-                index += 1
+                // Keep a carriage return: it's a redraw, not part of the escape.
+                if scalars[index] != "\r" { index += 1 }
             }
         }
         return String(result)

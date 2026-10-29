@@ -68,6 +68,8 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
                            query: [URLQueryItem(name: "scope[]", value: "failed")])
     }
 
+    /// The whole trace: GitLab has no "last N lines" endpoint. Only its end is shown.
+    @concurrent
     func jobLog(projectID: Int, jobID: Int) async throws -> String {
         let request = try http.makeRequest(path: "/api/v4/projects/\(projectID)/jobs/\(jobID)/trace")
         return String(decoding: try await http.send(request).data, as: UTF8.self)

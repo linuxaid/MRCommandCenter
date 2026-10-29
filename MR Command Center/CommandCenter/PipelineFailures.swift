@@ -60,6 +60,10 @@ final class PipelineFailures {
             guard self.pipelineID == pipelineID else { return }
             let ordered = Self.ordered(jobs)
             phase = .loaded(ordered)
+            // Reloading the same pipeline: forget jobs that are no longer listed.
+            let listed = Set(ordered.map(\.id))
+            openJobs.formIntersection(listed)
+            logs = logs.filter { listed.contains($0.key) }
             if openJobs.isEmpty, let job = Self.jobToOpen(ordered) {
                 openJobs = [job.id]
                 await loadLog(of: job, projectID: projectID, client: client)
@@ -91,6 +95,8 @@ final class PipelineFailures {
             let tail = await Self.tail(raw)
             guard self.pipelineID == pipelineID else { return }
             logs[job.id] = .loaded(lines: tail.lines, omitted: tail.omitted)
+        } catch is CancellationError {
+            if self.pipelineID == pipelineID, logs[job.id] == .loading { logs[job.id] = nil }
         } catch {
             guard self.pipelineID == pipelineID else { return }
             logs[job.id] = .failed(Self.describe(error))

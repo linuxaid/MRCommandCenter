@@ -44,6 +44,17 @@ struct JobLogTests {
         #expect(tail.omitted == 100_000 - JobLog.tailLength)
     }
 
+    @Test func veryLongLinesAreCut() {
+        let lines = JobLog.lines(String(repeating: "x", count: 10_000) + "\nshort")
+        #expect(lines[0].count == JobLog.maxLineLength + 1)
+        #expect(lines[0].hasSuffix("…"))
+        #expect(lines[1] == "short")
+    }
+
+    @Test func aStrayEscapeDoesntEatARedraw() {
+        #expect(JobLog.lines("old\u{1B}\rnew") == ["new"])
+    }
+
     @Test func blankLinesInsideStayAndTrailingOnesGo() {
         #expect(JobLog.lines("a\n\nb\n\n\n") == ["a", "", "b"])
         #expect(JobLog.lines("") == [])
@@ -163,6 +174,26 @@ struct PipelineFailuresTests {
         await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: { spy })
 
         guard case .loaded = failures.phase else { Issue.record("Not loaded: \(failures.phase)"); return }
+    }
+
+    @Test func aLateJobListForAnOldPipelineIsDropped() async throws {
+        let (app, spy) = await loaded()
+        let failed = try mr(app, 1873)
+        let other = try mr(app, 80)
+        spy.edit { $0.jobsDelay = .milliseconds(300) }
+        let failures = PipelineFailures()
+        let late = Task {
+            await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: { spy })
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        spy.edit { $0.jobsDelay = nil }
+
+        await failures.load(projectID: other.projectID, pipelineID: try #require(other.pipelineID), client: { spy })
+        try await late.value
+
+        #expect(failures.pipelineID == other.pipelineID)
+        #expect(failures.phase == .loaded([]), "The canceled pipeline's empty list, not the failed one's jobs")
+        #expect(failures.openJobs.isEmpty)
     }
 
     @Test func aLateLogForAnOldPipelineIsDropped() async throws {

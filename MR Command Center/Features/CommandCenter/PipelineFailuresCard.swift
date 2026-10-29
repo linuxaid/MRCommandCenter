@@ -22,7 +22,7 @@ struct PipelineFailuresCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .card()
         }
-        .task(id: LoadKey(mrKey: mr.key, pipelineID: mr.pipelineID, status: mr.pipelineStatusRaw)) { await load() }
+        .task(id: LoadKey(mrKey: mr.key, pipelineID: mr.pipelineID)) { await load() }
     }
 
     @ViewBuilder
@@ -179,10 +179,10 @@ struct PipelineFailuresCard: View {
         return parts.compactMap(\.self).joined(separator: ", ")
     }
 
-    /// The status too: a pipeline retried and failed again between syncs keeps its ID.
+    /// A retry keeps the pipeline's ID, but while it runs the card isn't shown, so a failed
+    /// retry builds the card again and reloads.
     private struct LoadKey: Equatable {
         let mrKey: String
         let pipelineID: Int?
-        let status: String?
     }
 }

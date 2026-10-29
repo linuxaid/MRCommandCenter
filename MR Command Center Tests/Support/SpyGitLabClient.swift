@@ -36,6 +36,8 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         var jobLogOverride: String?
         /// Holds job-log replies for a while, so they can arrive after a newer pipeline loads.
         var jobLogDelay: Duration?
+        /// Holds job-list replies for a while, the same way.
+        var jobsDelay: Duration?
     }
 
     let state = Mutex(State())
@@ -196,6 +198,7 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
 
     func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
         record("failedJobs")
+        if let delay = state.withLock({ $0.jobsDelay }) { try await Task.sleep(for: delay) }
         if let failure = state.withLock({ $0.jobsFailure }) { throw failure }
         return try await mock.failedJobs(projectID: projectID, pipelineID: pipelineID)
     }
