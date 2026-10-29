@@ -206,6 +206,19 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return pipeline
     }
 
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
+        try check()
+        guard let pipeline = data.entries.first(where: { $0.detail.projectId == projectID && $0.detail.headPipeline?.id == pipelineID })?
+            .detail.headPipeline else { throw APIError.notFound }
+        guard pipeline.pipelineStatus == .failed else { return [] }
+        return MockPipelineJobs.failedJobs(pipelineID: pipelineID, pipelineURL: pipeline.webUrl)
+    }
+
+    func jobLog(projectID: Int, jobID: Int) async throws -> String {
+        try check()
+        return MockPipelineJobs.log(jobID: jobID)
+    }
+
     /// Retrying or starting a pipeline puts a new running one on the MR.
     func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
         guard let entry = data.entries.first(where: { $0.detail.headPipeline?.id == pipelineID }) else {

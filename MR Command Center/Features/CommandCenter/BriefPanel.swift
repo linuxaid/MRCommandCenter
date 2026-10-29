@@ -35,6 +35,9 @@ struct BriefPanel: View {
                     ChangesGlance(mr: mr)
                 }
                 ReadinessChecklist(mr: mr, readiness: situation.readiness, me: appModel.mergeRequests.username)
+                if PipelineFailures.isShown(for: mr) {
+                    PipelineFailuresCard(mr: mr)
+                }
                 OpenThreadsCard(mr: mr)
                 AutoMergeCard(mr: mr, situation: situation)
                 ContextCard(mr: mr)
