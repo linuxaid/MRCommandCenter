@@ -63,6 +63,21 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
         try await http.get(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)", decoder: .gitLab)
     }
 
+    func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
+        try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)/retry",
+                            body: EmptyRequest(), decoder: .gitLab)
+    }
+
+    func createMergeRequestPipeline(projectID: Int, iid: Int) async throws -> GitLabPipeline {
+        try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/pipelines",
+                            body: EmptyRequest(), decoder: .gitLab)
+    }
+
+    func createPipeline(projectID: Int, ref: String) async throws -> GitLabPipeline {
+        try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipeline",
+                            body: CreatePipelineRequest(ref: ref), decoder: .gitLab)
+    }
+
     func diffs(projectID: Int, iid: Int) async throws -> [GitLabDiff] {
         try await allPages(GitLabDiff.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/diffs", perPage: 30)
     }

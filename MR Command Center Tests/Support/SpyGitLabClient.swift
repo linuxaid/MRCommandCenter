@@ -25,6 +25,11 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         /// Fails merges of just these MRs (by iid), on top of `mergeFailure`.
         var mergeFailuresByIID: [Int: APIError] = [:]
         var merges: [MergeOptions] = []
+        /// Fails retrying and starting pipelines.
+        var pipelineFailure: APIError?
+        /// Fails only merge request pipelines, like a project whose CI has no MR pipelines.
+        var mergeRequestPipelineFailure: APIError?
+        var pipelineRefs: [String] = []
     }
 
     let state = Mutex(State())
@@ -181,6 +186,36 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         let note = try await client.replyToDiscussion(projectID: projectID, iid: iid, discussionID: discussionID, body: body)
         edit { $0.data = client.data }
         return note
+    }
+
+    func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
+        record("retryPipeline")
+        if let failure = state.withLock({ $0.pipelineFailure }) { throw failure }
+        let client = mock
+        let pipeline = try await client.retryPipeline(projectID: projectID, pipelineID: pipelineID)
+        edit { $0.data = client.data }
+        return pipeline
+    }
+
+    func createMergeRequestPipeline(projectID: Int, iid: Int) async throws -> GitLabPipeline {
+        record("createMergeRequestPipeline")
+        if let failure = state.withLock({ $0.pipelineFailure ?? $0.mergeRequestPipelineFailure }) { throw failure }
+        let client = mock
+        let pipeline = try await client.createMergeRequestPipeline(projectID: projectID, iid: iid)
+        edit { $0.data = client.data }
+        return pipeline
+    }
+
+    func createPipeline(projectID: Int, ref: String) async throws -> GitLabPipeline {
+        record("createPipeline")
+        if let failure = state.withLock({ $0.pipelineFailure }) { throw failure }
+        let client = mock
+        let pipeline = try await client.createPipeline(projectID: projectID, ref: ref)
+        edit { state in
+            state.pipelineRefs.append(ref)
+            state.data = client.data
+        }
+        return pipeline
     }
 
     func pipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
