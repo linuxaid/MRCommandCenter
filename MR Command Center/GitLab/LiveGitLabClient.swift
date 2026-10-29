@@ -63,6 +63,33 @@ nonisolated struct LiveGitLabClient: GitLabAPI {
         try await http.get(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)", decoder: .gitLab)
     }
 
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
+        try await allPages(GitLabJob.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)/jobs",
+                           query: [URLQueryItem(name: "scope[]", value: "failed")])
+    }
+
+    /// The whole trace: GitLab has no "last N lines" endpoint. Only its end is shown.
+    @concurrent
+    func jobLog(projectID: Int, jobID: Int) async throws -> String {
+        let request = try http.makeRequest(path: "/api/v4/projects/\(projectID)/jobs/\(jobID)/trace")
+        return String(decoding: try await http.send(request).data, as: UTF8.self)
+    }
+
+    func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
+        try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipelines/\(pipelineID)/retry",
+                            body: EmptyRequest(), decoder: .gitLab)
+    }
+
+    func createMergeRequestPipeline(projectID: Int, iid: Int) async throws -> GitLabPipeline {
+        try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/pipelines",
+                            body: EmptyRequest(), decoder: .gitLab)
+    }
+
+    func createPipeline(projectID: Int, ref: String) async throws -> GitLabPipeline {
+        try await http.post(GitLabPipeline.self, path: "/api/v4/projects/\(projectID)/pipeline",
+                            body: CreatePipelineRequest(ref: ref), decoder: .gitLab)
+    }
+
     func diffs(projectID: Int, iid: Int) async throws -> [GitLabDiff] {
         try await allPages(GitLabDiff.self, path: "/api/v4/projects/\(projectID)/merge_requests/\(iid)/diffs", perPage: 30)
     }

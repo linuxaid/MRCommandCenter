@@ -62,6 +62,36 @@ struct LayoutStressTests {
         #expect(minimum <= 1000, "Window minimum should fit a laptop screen, was \(minimum)")
     }
 
+    /// A failed pipeline's brief shows its failed job's log (#35): a scroll view around text as
+    /// wide as its longest line. In the briefing and in Review mode's rail.
+    @Test(arguments: [false, true])
+    func resizingWithAFailedJobsLogOpenDoesNotLoop(inReviewMode: Bool) async throws {
+        let model = AppModel.testing()
+        await model.refresh(.automatic)
+        let mr = try #require(model.mergeRequests.trackedMergeRequests.first { $0.iid == 1873 })
+        #expect(PipelineFailures.isShown(for: mr))
+        if inReviewMode {
+            model.review(mr)
+        } else {
+            model.commandCenter.destination = .briefing
+            model.mergeRequests.selectedKey = mr.key
+        }
+
+        let window = try await host(RootView().environment(model).modelContainer(model.modelContainer), width: 1400)
+        defer { window.orderOut(nil) }
+        // Let the mock's job list and the auto-opened log arrive.
+        try await Task.sleep(for: .milliseconds(500))
+
+        for width in [1100, 900, 700, 500, 1400] {
+            window.setContentSize(NSSize(width: width, height: 800))
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        window.setContentSize(NSSize(width: 300, height: 800))
+        try await Task.sleep(for: .milliseconds(300))
+        let minimum = window.contentLayoutRect.width
+        #expect(minimum <= 1000, "The log mustn't widen the window, was \(minimum)")
+    }
+
     /// The read-only panel for a merged MR, opened from Activity, sits in the detail column too.
     @Test func resizingWithAMergedMROpenFromActivityDoesNotLoop() async throws {
         let spy = SpyGitLabClient()

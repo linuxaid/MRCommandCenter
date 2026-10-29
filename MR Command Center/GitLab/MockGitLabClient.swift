@@ -206,6 +206,52 @@ nonisolated struct MockGitLabClient: GitLabAPI {
         return pipeline
     }
 
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
+        try check()
+        guard let pipeline = data.entries.first(where: { $0.detail.projectId == projectID && $0.detail.headPipeline?.id == pipelineID })?
+            .detail.headPipeline else { throw APIError.notFound }
+        guard pipeline.pipelineStatus == .failed else { return [] }
+        return MockPipelineJobs.failedJobs(pipelineID: pipelineID, pipelineURL: pipeline.webUrl)
+    }
+
+    func jobLog(projectID: Int, jobID: Int) async throws -> String {
+        try check()
+        return MockPipelineJobs.log(jobID: jobID)
+    }
+
+    /// Retrying or starting a pipeline puts a new running one on the MR.
+    func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
+        guard let entry = data.entries.first(where: { $0.detail.headPipeline?.id == pipelineID }) else {
+            try check()
+            throw APIError.notFound
+        }
+        return try startPipeline(projectID: projectID, iid: entry.detail.iid, id: pipelineID)
+    }
+
+    func createMergeRequestPipeline(projectID: Int, iid: Int) async throws -> GitLabPipeline {
+        let entry = try entry(projectID, iid)
+        return try startPipeline(projectID: projectID, iid: iid, id: (entry.detail.headPipeline?.id ?? iid * 100) + 1)
+    }
+
+    func createPipeline(projectID: Int, ref: String) async throws -> GitLabPipeline {
+        try check()
+        guard let entry = data.entries.first(where: { $0.detail.projectId == projectID && $0.detail.sourceBranch == ref }) else {
+            throw APIError.server(status: 400)
+        }
+        return try startPipeline(projectID: projectID, iid: entry.detail.iid, id: (entry.detail.headPipeline?.id ?? entry.detail.iid * 100) + 1)
+    }
+
+    private func startPipeline(projectID: Int, iid: Int, id: Int) throws -> GitLabPipeline {
+        let entry = try entry(projectID, iid)
+        let webURL = entry.detail.webUrl.components(separatedBy: "/-/merge_requests").first.map { "\($0)/-/pipelines/\(id)" }
+        let pipeline = GitLabPipeline(id: id, sha: entry.detail.sha, status: "running", webUrl: webURL)
+        store.mutate(projectID: projectID, iid: iid) { entry in
+            entry.detail.headPipeline = pipeline
+            entry.bumpUpdatedAt()
+        }
+        return pipeline
+    }
+
     private func check() throws {
         if let failure { throw failure }
     }

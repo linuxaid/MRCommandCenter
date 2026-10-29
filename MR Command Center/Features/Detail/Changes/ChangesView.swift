@@ -144,12 +144,19 @@ struct ChangesView: View {
                 appModel.commandCenter.editLabels(mr)
                 return .handled
             }
-            .onKeyPress(keys: [.upArrow, .downArrow]) { press in
-                let handled = model.handleArrow(
-                    by: press.key == .downArrow ? 1 : -1,
-                    modifiers: press.modifiers,
-                    isComposing: comments.activeTarget != nil
-                )
+            .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow]) { press in
+                let isComposing = comments.activeTarget != nil
+                let handled = switch press.key {
+                case .leftArrow, .rightArrow:
+                    // Animated like a click on the folder.
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        model.handleSideArrow(opens: press.key == .rightArrow, modifiers: press.modifiers,
+                                              isComposing: isComposing)
+                    }
+                default:
+                    model.handleArrow(by: press.key == .downArrow ? 1 : -1, modifiers: press.modifiers,
+                                      isComposing: isComposing)
+                }
                 return handled ? .handled : .ignored
             }
             .onAppear { isFocused = true }
@@ -285,8 +292,8 @@ private struct DiffFileList: View {
     var body: some View {
         ScrollViewReader { proxy in
             // Ignore the list clearing the selection when its row is hidden in a closed folder:
-            // the file stays selected and shown.
-            List(selection: Binding(get: { model.selectedFileID }, set: { if let id = $0 { model.selectedFileID = id } })) {
+            // the file stays selected and shown. A folder row can hold the selection too (#33).
+            List(selection: Binding(get: { model.cursor?.rowID }, set: { if let id = $0 { model.select(rowID: id) } })) {
                 Section {
                     if showsTree {
                         ForEach(model.tree.rows(collapsed: model.collapsedFolders)) { row in
@@ -296,7 +303,7 @@ private struct DiffFileList: View {
                                           isExpanded: isExpanded, depth: row.depth) {
                                     withAnimation(.easeOut(duration: 0.12)) { model.toggleFolder(folder.path) }
                                 }
-                                .selectionDisabled()
+                                .tag(row.id)
                             case .file(let file):
                                 fileRow(file, showsDirectory: false)
                                     .padding(.leading, CGFloat(row.depth) * FolderRow.indent)
@@ -326,14 +333,14 @@ private struct DiffFileList: View {
                 }
             }
             // Keep the row in view when the arrow keys move the selection past the visible files.
-            .onChange(of: model.selectedFileID, initial: true) { _, id in
-                guard let id else { return }
-                proxy.scrollTo(id)
+            .onChange(of: model.cursor, initial: true) { _, cursor in
+                guard let cursor else { return }
+                proxy.scrollTo(cursor.rowID)
             }
             .onChange(of: showsTree, initial: true) { _, isOn in
                 if model.showsTree != isOn { model.showsTree = isOn }
                 // The rows were swapped but the selection didn't change: bring it back into view.
-                if let id = model.selectedFileID { proxy.scrollTo(id) }
+                if let cursor = model.cursor { proxy.scrollTo(cursor.rowID) }
             }
         }
     }

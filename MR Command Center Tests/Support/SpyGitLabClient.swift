@@ -25,6 +25,19 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         /// Fails merges of just these MRs (by iid), on top of `mergeFailure`.
         var mergeFailuresByIID: [Int: APIError] = [:]
         var merges: [MergeOptions] = []
+        /// Fails retrying and starting pipelines.
+        var pipelineFailure: APIError?
+        /// Fails only merge request pipelines, like a project whose CI has no MR pipelines.
+        var mergeRequestPipelineFailure: APIError?
+        var pipelineRefs: [String] = []
+        var jobsFailure: APIError?
+        var jobLogFailure: APIError?
+        /// Replaces every job log, to test cleaning and trimming.
+        var jobLogOverride: String?
+        /// Holds job-log replies for a while, so they can arrive after a newer pipeline loads.
+        var jobLogDelay: Duration?
+        /// Holds job-list replies for a while, the same way.
+        var jobsDelay: Duration?
     }
 
     let state = Mutex(State())
@@ -181,6 +194,52 @@ nonisolated final class SpyGitLabClient: GitLabAPI {
         let note = try await client.replyToDiscussion(projectID: projectID, iid: iid, discussionID: discussionID, body: body)
         edit { $0.data = client.data }
         return note
+    }
+
+    func failedJobs(projectID: Int, pipelineID: Int) async throws -> [GitLabJob] {
+        record("failedJobs")
+        if let delay = state.withLock({ $0.jobsDelay }) { try await Task.sleep(for: delay) }
+        if let failure = state.withLock({ $0.jobsFailure }) { throw failure }
+        return try await mock.failedJobs(projectID: projectID, pipelineID: pipelineID)
+    }
+
+    func jobLog(projectID: Int, jobID: Int) async throws -> String {
+        record("jobLog")
+        if let delay = state.withLock({ $0.jobLogDelay }) { try await Task.sleep(for: delay) }
+        let (failure, override) = state.withLock { ($0.jobLogFailure, $0.jobLogOverride) }
+        if let failure { throw failure }
+        if let override { return override }
+        return try await mock.jobLog(projectID: projectID, jobID: jobID)
+    }
+
+    func retryPipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
+        record("retryPipeline")
+        if let failure = state.withLock({ $0.pipelineFailure }) { throw failure }
+        let client = mock
+        let pipeline = try await client.retryPipeline(projectID: projectID, pipelineID: pipelineID)
+        edit { $0.data = client.data }
+        return pipeline
+    }
+
+    func createMergeRequestPipeline(projectID: Int, iid: Int) async throws -> GitLabPipeline {
+        record("createMergeRequestPipeline")
+        if let failure = state.withLock({ $0.pipelineFailure ?? $0.mergeRequestPipelineFailure }) { throw failure }
+        let client = mock
+        let pipeline = try await client.createMergeRequestPipeline(projectID: projectID, iid: iid)
+        edit { $0.data = client.data }
+        return pipeline
+    }
+
+    func createPipeline(projectID: Int, ref: String) async throws -> GitLabPipeline {
+        record("createPipeline")
+        if let failure = state.withLock({ $0.pipelineFailure }) { throw failure }
+        let client = mock
+        let pipeline = try await client.createPipeline(projectID: projectID, ref: ref)
+        edit { state in
+            state.pipelineRefs.append(ref)
+            state.data = client.data
+        }
+        return pipeline
     }
 
     func pipeline(projectID: Int, pipelineID: Int) async throws -> GitLabPipeline {
