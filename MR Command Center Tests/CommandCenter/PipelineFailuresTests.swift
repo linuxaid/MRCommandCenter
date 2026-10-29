@@ -27,6 +27,23 @@ struct JobLogTests {
         #expect(JobLog.lines("one\r\r\ntwo") == ["one", "two"])
     }
 
+    @Test func sectionOnlyLinesAreDropped() {
+        #expect(JobLog.lines("a\nsection_end:1730000003:prepare_executor\r\(esc)[0K\nb") == ["a", "b"])
+    }
+
+    @Test func otherEscapesAreRemovedWhole() {
+        #expect(JobLog.lines("\(esc)]8;;https://x.test\u{07}link\(esc)]8;;\u{07} done") == ["link done"])
+        #expect(JobLog.lines("\(esc)(Bplain\(esc)[?25h") == ["plain"])
+    }
+
+    @Test func aHugeLogKeepsTheSameTail() {
+        let raw = (1...100_000).map { "\(esc)[32mline \($0)\(esc)[0m" }.joined(separator: "\n") + "\n\n"
+        let tail = JobLog.tail(raw)
+        #expect(tail.lines.count == JobLog.tailLength)
+        #expect(tail.lines.last == "line 100000")
+        #expect(tail.omitted == 100_000 - JobLog.tailLength)
+    }
+
     @Test func blankLinesInsideStayAndTrailingOnesGo() {
         #expect(JobLog.lines("a\n\nb\n\n\n") == ["a", "", "b"])
         #expect(JobLog.lines("") == [])
@@ -97,11 +114,79 @@ struct PipelineFailuresTests {
         let failed = try mr(app, 1873)
         let failures = PipelineFailures()
 
-        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: spy)
+        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: { spy })
 
         guard case .loaded(let jobs) = failures.phase else { Issue.record("Not loaded: \(failures.phase)"); return }
         #expect(jobs.map(\.name) == ["test:unit", "lint:style"])
-        #expect(PipelineFailures.jobToOpen(jobs)?.name == "test:unit")
+        let breaking = try #require(PipelineFailures.jobToOpen(jobs))
+        #expect(breaking.name == "test:unit")
+        #expect(failures.openJobs == [breaking.id], "The only breaking job opens by itself")
+        #expect(spy.count("jobLog") == 1)
+        guard case .loaded? = failures.logs[breaking.id] else { Issue.record("Its log isn't loaded"); return }
+    }
+
+    @Test func togglingAJobShowsAndHidesItsLog() async throws {
+        let (app, spy) = await loaded()
+        let failed = try mr(app, 1873)
+        let failures = PipelineFailures()
+        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: { spy })
+        guard case .loaded(let jobs) = failures.phase else { Issue.record("Not loaded"); return }
+        let allowed = try #require(jobs.last)
+
+        await failures.toggle(allowed, projectID: failed.projectID, client: { spy })
+        #expect(failures.openJobs.contains(allowed.id))
+        await failures.toggle(allowed, projectID: failed.projectID, client: { spy })
+        #expect(!failures.openJobs.contains(allowed.id))
+        await failures.toggle(allowed, projectID: failed.projectID, client: { spy })
+        #expect(spy.count("jobLog") == 2, "The auto-opened job's log and this one's, each once")
+    }
+
+    @Test func aClientThatCantBeMadeIsExplained() async throws {
+        let failures = PipelineFailures()
+        await failures.load(projectID: 1, pipelineID: 2, client: { throw APIError.missingToken })
+        guard case .failed = failures.phase else { Issue.record("Still \(failures.phase)"); return }
+        await failures.loadLog(of: GitLabJob(id: 3, name: "t", status: "failed"), projectID: 1,
+                               client: { throw APIError.missingToken })
+        guard case .failed? = failures.logs[3] else { Issue.record("Log not failed"); return }
+    }
+
+    @Test func tryingTheJobListAgainLoadsIt() async throws {
+        let (app, spy) = await loaded()
+        let failed = try mr(app, 1873)
+        let pipelineID = try #require(failed.pipelineID)
+        let failures = PipelineFailures()
+        spy.edit { $0.jobsFailure = .forbidden }
+        await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: { spy })
+        guard case .failed = failures.phase else { Issue.record("Not failed"); return }
+
+        spy.edit { $0.jobsFailure = nil }
+        await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: { spy })
+
+        guard case .loaded = failures.phase else { Issue.record("Not loaded: \(failures.phase)"); return }
+    }
+
+    @Test func aLateLogForAnOldPipelineIsDropped() async throws {
+        let (app, spy) = await loaded()
+        let failed = try mr(app, 1873)
+        let other = try mr(app, 80)
+        let failures = PipelineFailures()
+        spy.edit { $0.jobsFailure = .forbidden }  // No auto-open, so only the log below is in flight.
+        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: { spy })
+        spy.edit {
+            $0.jobsFailure = nil
+            $0.jobLogDelay = .milliseconds(300)
+        }
+        let late = Task {
+            await failures.loadLog(of: GitLabJob(id: 99, name: "t", status: "failed"), projectID: failed.projectID,
+                                   client: { spy })
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        await failures.load(projectID: other.projectID, pipelineID: try #require(other.pipelineID), client: { spy })
+        await late.value
+
+        #expect(failures.pipelineID == other.pipelineID)
+        #expect(failures.logs[99] == nil, "The old pipeline's log arrived late and was dropped")
     }
 
     @Test func opensNothingByItselfWhenSeveralJobsBrokeIt() {
@@ -116,13 +201,13 @@ struct PipelineFailuresTests {
         spy.edit { $0.jobLogOverride = (1...500).map { "line \($0)" }.joined(separator: "\n") }
         let failures = PipelineFailures()
         let pipelineID = try #require(failed.pipelineID)
-        await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: spy)
+        await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: { spy })
         let job = GitLabJob(id: 99, name: "test", status: "failed")
 
-        await failures.loadLog(of: job, projectID: failed.projectID, client: spy)
-        await failures.loadLog(of: job, projectID: failed.projectID, client: spy)
+        await failures.loadLog(of: job, projectID: failed.projectID, client: { spy })
+        await failures.loadLog(of: job, projectID: failed.projectID, client: { spy })
 
-        #expect(spy.count("jobLog") == 1, "A loaded log isn't fetched again")
+        #expect(spy.count("jobLog") == 2, "The auto-opened job's log, and this one's once")
         guard case .loaded(let lines, let omitted)? = failures.logs[99] else { Issue.record("No log"); return }
         #expect(lines.count == JobLog.tailLength)
         #expect(lines.last == "line 500")
@@ -133,16 +218,16 @@ struct PipelineFailuresTests {
         let (app, spy) = await loaded()
         let failed = try mr(app, 1873)
         let failures = PipelineFailures()
-        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: spy)
+        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: { spy })
         let job = GitLabJob(id: 99, name: "test", status: "failed")
         spy.edit { $0.jobLogFailure = .notFound }
 
-        await failures.loadLog(of: job, projectID: failed.projectID, client: spy)
+        await failures.loadLog(of: job, projectID: failed.projectID, client: { spy })
         guard case .failed(let message)? = failures.logs[99] else { Issue.record("Not failed"); return }
         #expect(message.contains("404"))
 
         spy.edit { $0.jobLogFailure = nil }
-        await failures.loadLog(of: job, projectID: failed.projectID, client: spy)
+        await failures.loadLog(of: job, projectID: failed.projectID, client: { spy })
         guard case .loaded? = failures.logs[99] else { Issue.record("Not retried"); return }
     }
 
@@ -152,7 +237,7 @@ struct PipelineFailuresTests {
         spy.edit { $0.jobsFailure = .forbidden }
         let failures = PipelineFailures()
 
-        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: spy)
+        await failures.load(projectID: failed.projectID, pipelineID: try #require(failed.pipelineID), client: { spy })
 
         guard case .failed(let message) = failures.phase else { Issue.record("Not failed"); return }
         #expect(message.contains("403"))
@@ -163,14 +248,15 @@ struct PipelineFailuresTests {
         let failed = try mr(app, 1873)
         let failures = PipelineFailures()
         let pipelineID = try #require(failed.pipelineID)
-        await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: spy)
-        await failures.loadLog(of: GitLabJob(id: 99, name: "t", status: "failed"), projectID: failed.projectID, client: spy)
+        await failures.load(projectID: failed.projectID, pipelineID: pipelineID, client: { spy })
+        await failures.loadLog(of: GitLabJob(id: 99, name: "t", status: "failed"), projectID: failed.projectID, client: { spy })
         #expect(failures.logs[99] != nil)
 
         let other = try mr(app, 80)
-        await failures.load(projectID: other.projectID, pipelineID: try #require(other.pipelineID), client: spy)
+        await failures.load(projectID: other.projectID, pipelineID: try #require(other.pipelineID), client: { spy })
 
         #expect(failures.logs.isEmpty, "Old logs are dropped")
+        #expect(failures.openJobs.isEmpty)
         #expect(failures.phase == .loaded([]), "A canceled pipeline lists no failed jobs in the mock")
     }
 

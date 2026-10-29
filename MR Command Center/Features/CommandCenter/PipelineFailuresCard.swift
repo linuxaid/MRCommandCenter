@@ -7,7 +7,6 @@ struct PipelineFailuresCard: View {
     let mr: TrackedMR
     @Environment(AppModel.self) private var appModel
     @State private var failures = PipelineFailures()
-    @State private var openJobs: Set<Int> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -23,7 +22,7 @@ struct PipelineFailuresCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .card()
         }
-        .task(id: LoadKey(mrKey: mr.key, pipelineID: mr.pipelineID)) { await load() }
+        .task(id: LoadKey(mrKey: mr.key, pipelineID: mr.pipelineID, status: mr.pipelineStatusRaw)) { await load() }
     }
 
     @ViewBuilder
@@ -59,10 +58,10 @@ struct PipelineFailuresCard: View {
     }
 
     private func jobRow(_ job: GitLabJob) -> some View {
-        let isOpen = openJobs.contains(job.id)
+        let isOpen = failures.openJobs.contains(job.id)
         return VStack(alignment: .leading, spacing: 8) {
             Button {
-                toggle(job)
+                Task { await failures.toggle(job, projectID: mr.projectID, client: client) }
             } label: {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "chevron.right")
@@ -91,7 +90,7 @@ struct PipelineFailuresCard: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Job \(job.name), failed")
+            .accessibilityLabel(accessibilityLabel(job))
             .accessibilityHint(isOpen ? "Hides its log" : "Shows the end of its log")
             if isOpen {
                 log(of: job)
@@ -161,33 +160,29 @@ struct PipelineFailuresCard: View {
         }
     }
 
-    private func toggle(_ job: GitLabJob) {
-        if openJobs.remove(job.id) == nil {
-            openJobs.insert(job.id)
-            Task { await loadLog(job) }
-        }
+    private var client: PipelineFailures.ClientSource {
+        let center = appModel.commandCenter
+        return { try center.gitLabClient() }
     }
 
     private func load() async {
         guard let pipelineID = mr.pipelineID else { return }
-        if failures.pipelineID != pipelineID { openJobs = [] }
-        guard let client = try? appModel.commandCenter.gitLabClient() else { return }
         await failures.load(projectID: mr.projectID, pipelineID: pipelineID, client: client)
-        // Open the only job that broke the pipeline, since that's the one you'd click.
-        if case .loaded(let jobs) = failures.phase, openJobs.isEmpty,
-           let only = PipelineFailures.jobToOpen(jobs) {
-            openJobs = [only.id]
-            await loadLog(only)
-        }
     }
 
     private func loadLog(_ job: GitLabJob) async {
-        guard let client = try? appModel.commandCenter.gitLabClient() else { return }
         await failures.loadLog(of: job, projectID: mr.projectID, client: client)
     }
 
+    private func accessibilityLabel(_ job: GitLabJob) -> String {
+        let parts = ["Job \(job.name)", job.allowFailure == true ? "failed, allowed to fail" : "failed", job.failureText]
+        return parts.compactMap(\.self).joined(separator: ", ")
+    }
+
+    /// The status too: a pipeline retried and failed again between syncs keeps its ID.
     private struct LoadKey: Equatable {
         let mrKey: String
         let pipelineID: Int?
+        let status: String?
     }
 }
