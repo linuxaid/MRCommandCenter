@@ -100,6 +100,14 @@ final class TrackedMR {
     /// Open (not posted, not dismissed) AI concerns from the latest review at `aiReviewedSHA`.
     var aiOpenConcerns: Int = 0
 
+    /// How hard it is to review (#36): what the diff says (`DiffFacts`, JSON), valid when
+    /// `difficultySHA == headSHA`, and the on-device model's nudge (`DifficultyNudge`, JSON)
+    /// at `difficultyNudgeSHA`.
+    var difficultyFactsData: Data?
+    var difficultySHA: String?
+    var difficultyNudgeData: Data?
+    var difficultyNudgeSHA: String?
+
     /// Cached from the MR's Jira issue (`JiraCheck`) for the sidebar and checks.
     var jiraLookupRaw: String?
     var jiraStatus: String?
@@ -181,6 +189,25 @@ extension TrackedMR {
         return lastActivityAt > (seenAt ?? .distantPast)
     }
     var shortSHA: String { String(headSHA.prefix(8)) }
+
+    /// The diff facts for the current head commit, if they've been worked out.
+    var difficultyFacts: DiffFacts? {
+        guard difficultySHA == headSHA, let difficultyFactsData else { return nil }
+        return try? JSONDecoder().decode(DiffFacts.self, from: difficultyFactsData)
+    }
+
+    /// The model's nudge for the current head commit, if it gave one.
+    var difficultyNudge: DifficultyNudge? {
+        guard difficultyNudgeSHA == headSHA, let difficultyNudgeData else { return nil }
+        return try? JSONDecoder().decode(DifficultyNudge.self, from: difficultyNudgeData)
+    }
+
+    /// Nil until the diff at the current head has been looked at.
+    var difficulty: Difficulty? {
+        difficultyFacts.map {
+            Difficulty(facts: $0, openThreads: unresolvedDiscussions, threads: resolvableDiscussions, nudge: difficultyNudge)
+        }
+    }
 
     var diffRefs: DiffRefs? {
         guard let baseSHA, let startSHA, !headSHA.isEmpty else { return nil }

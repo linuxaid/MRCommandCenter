@@ -167,9 +167,20 @@ final class CommandCenter {
         MRSituation.make(for: mr, me: store.username, rule: ruleStatus(for: mr))
     }
 
-    /// Open MRs grouped by lane, each lane newest first.
+    /// How MRs are ordered inside each lane. Remembered in settings.
+    var laneOrder: LaneOrder {
+        get { LaneOrder(rawValue: settings.laneOrderRaw) ?? .easiestFirst }
+        set {
+            settings.laneOrderRaw = newValue.rawValue
+            save()
+        }
+    }
+
+    /// Open MRs grouped by lane, each lane in `laneOrder`.
     func lanes() -> [Lane: [TrackedMR]] {
-        Dictionary(grouping: store.trackedMergeRequests) { situation(for: $0).lane }
+        let order = laneOrder
+        return Dictionary(grouping: store.trackedMergeRequests) { situation(for: $0).lane }
+            .mapValues(order.sorted)
     }
 
     /// The lanes a destination shows, in display order.

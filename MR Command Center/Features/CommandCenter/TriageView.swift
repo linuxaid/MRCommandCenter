@@ -22,6 +22,8 @@ struct TriageView: View {
                     } else if case .lane(let lane) = destination {
                         LaneTitle(lane: lane, count: lanes[lane]?.count ?? 0)
                     }
+                    LaneOrderMenu()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     ForEach(shown) { lane in
                         let items = lanes[lane] ?? []
                         if destination != .briefing || !items.isEmpty {
@@ -85,6 +87,24 @@ struct TriageView: View {
             return .handled
         }
         .onAppear { isFocused = true }
+    }
+}
+
+/// Easiest first (the default) or the order from before difficulty scores (#36).
+private struct LaneOrderMenu: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let center = appModel.commandCenter
+        Picker("Sort", selection: Binding(get: { center.laneOrder }, set: { center.laneOrder = $0 })) {
+            ForEach(LaneOrder.allCases) { order in
+                Text(order.title).tag(order)
+            }
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+        .controlSize(.small)
+        .help("How merge requests are ordered inside each section")
     }
 }
 
@@ -232,7 +252,10 @@ struct TriageRow: View {
         let selectionColor = Theme.selectionColor(for: situation.lane)
 
         HStack(alignment: .top, spacing: 12) {
-            Avatar(name: mr.authorName, size: 28)
+            VStack(spacing: 6) {
+                DifficultyBadge(difficulty: mr.difficulty)
+                Avatar(name: mr.authorName, size: 28)
+            }
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(situation.headline)

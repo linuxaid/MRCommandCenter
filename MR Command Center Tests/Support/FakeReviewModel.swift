@@ -25,6 +25,9 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
         var delay: Duration = .zero
         /// Throw a parse failure for these paths on the first (greedy) attempt.
         var parseFailureOnGreedy: Set<String> = []
+        var difficultyCalls: [Call] = []
+        /// What `difficulty` answers; nil throws a model failure.
+        var difficultyNudge: DifficultyNudge? = DifficultyNudge(feel: .aboutRight, reason: "Fake reason.")
     }
 
     let identifier = "fake-model"
@@ -40,6 +43,7 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
     var fileCalls: [Call] { state.withLock { $0.fileCalls } }
     var verdictCalls: [Call] { state.withLock { $0.verdictCalls } }
     var maxInFlight: Int { state.withLock { $0.maxInFlight } }
+    var difficultyCalls: [Call] { state.withLock { $0.difficultyCalls } }
 
     func reviewFile(instructions: String, prompt: String, options: ReviewOptions, tools: ReviewTools?) async throws -> (FileReviewResult, ModelCallRecord) {
         let call = Call(instructions: instructions, prompt: prompt)
@@ -71,5 +75,14 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
                                     topConcerns: anyHigh ? ["A high-severity concern"] : [], rationale: "Fake rationale.")
         return (verdict, ModelCallRecord(instructions: instructions, prompt: prompt, transcript: "t", rawOutput: "{}",
                                          inputTokens: 100, outputTokens: 30, latency: 0.01))
+    }
+
+    func difficulty(instructions: String, prompt: String, options: ReviewOptions) async throws -> DifficultyNudge {
+        let nudge = state.withLock { state in
+            state.difficultyCalls.append(Call(instructions: instructions, prompt: prompt))
+            return state.difficultyNudge
+        }
+        guard let nudge else { throw ReviewModelError(failure: .modelUnavailable, transcript: "") }
+        return nudge
     }
 }

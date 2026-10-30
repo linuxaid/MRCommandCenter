@@ -55,6 +55,8 @@ final class AccountSettings {
     /// Merge MRs you're reviewing (not ones you opened) as soon as they're ready, without a rule.
     /// Its own opt-in: it merges for real even while merge rules are a dry run.
     var mergeReadyReviewsAutomatically: Bool = false
+    /// How MRs are ordered inside each lane (`LaneOrder`); easiest first unless changed (#36).
+    var laneOrderRaw: String = LaneOrder.easiestFirst.rawValue
     var notifyNewReviewRequests: Bool = false
     var notifyPipelineFailures: Bool = false
 
