@@ -17,10 +17,17 @@ struct TriageView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    DadJokeLine(joke: appModel.dadJoke.joke())
+                        .padding(.bottom, -12)
                     if destination == .briefing {
                         BriefingHeader(lanes: lanes)
                     } else if case .lane(let lane) = destination {
                         LaneTitle(lane: lane, count: lanes[lane]?.count ?? 0)
+                    }
+                    if shown.contains(where: { !(lanes[$0] ?? []).isEmpty }) {
+                        LaneOrderMenu()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.top, -16)
                     }
                     ForEach(shown) { lane in
                         let items = lanes[lane] ?? []
@@ -85,6 +92,45 @@ struct TriageView: View {
             return .handled
         }
         .onAppear { isFocused = true }
+    }
+}
+
+/// Today's dad joke (#38), above everything else.
+private struct DadJokeLine: View {
+    let joke: DadJoke
+
+    var body: some View {
+        Label {
+            Text(joke.text)
+                .italic()
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Text("😄").accessibilityHidden(true)
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(Theme.inkSecondary)
+        .textSelection(.enabled)
+        .help(joke.isFromModel ? "Today's dad joke, written by Apple's on-device model. A new one tomorrow."
+                               : "Today's dad joke, from the app's own collection while Apple's on-device model can't write one.")
+        .accessibilityLabel("Today's dad joke: \(joke.text)")
+    }
+}
+
+/// Easiest first (the default) or the order from before difficulty scores (#36).
+private struct LaneOrderMenu: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let center = appModel.commandCenter
+        Picker("Sort", selection: Binding(get: { center.laneOrder }, set: { center.laneOrder = $0 })) {
+            ForEach(LaneOrder.allCases) { order in
+                Text(order.title).tag(order)
+            }
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+        .controlSize(.small)
+        .help("How merge requests are ordered inside each section")
     }
 }
 
@@ -232,7 +278,10 @@ struct TriageRow: View {
         let selectionColor = Theme.selectionColor(for: situation.lane)
 
         HStack(alignment: .top, spacing: 12) {
-            Avatar(name: mr.authorName, size: 28)
+            VStack(spacing: 6) {
+                DifficultyBadge(difficulty: mr.difficulty)
+                Avatar(name: mr.authorName, size: 28)
+            }
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(situation.headline)

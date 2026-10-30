@@ -11,6 +11,8 @@ final class AppModel {
     let diffs: DiffService
     let discussions: DiscussionService
     let staticChecks: StaticCheckService
+    let difficulty: DifficultyService
+    let dadJoke: DadJokeService
     let aiReview: AIReviewService
     let summaryPoster: SummaryPoster
     let evaluation: EvalService
@@ -44,6 +46,8 @@ final class AppModel {
         }
         discussions.refreshMergeRequest = { mr in await store.refreshDetails(for: mr) }
         staticChecks = StaticCheckService(container: modelContainer, diffs: diffs)
+        difficulty = DifficultyService(container: modelContainer, dependencies: dependencies, diffs: diffs)
+        dadJoke = DadJokeService(container: modelContainer, dependencies: dependencies)
         jira = JiraService(container: modelContainer, dependencies: dependencies)
         aiReview = AIReviewService(container: modelContainer, dependencies: dependencies, diffs: diffs, staticChecks: staticChecks, jira: jira)
         summaryPoster = SummaryPoster(container: modelContainer, aiReview: aiReview, discussions: discussions)
@@ -64,13 +68,19 @@ final class AppModel {
         isReviewing = true
     }
 
-    /// Refreshes the MR list, runs static checks for any new head SHAs, then lets merge rules act.
+    /// Refreshes the MR list, runs static checks and difficulty scores for any new head SHAs, then
+    /// lets merge rules act. The model's difficulty nudges carry on in the background.
     func refresh(_ trigger: RefreshTrigger) async {
         await mergeRequests.refresh(trigger)
         await jira.refresh(for: mergeRequests.trackedMergeRequests, trigger: trigger)
         await staticChecks.evaluateMissing(mergeRequests.trackedMergeRequests)
+        await difficulty.evaluateMissing(mergeRequests.trackedMergeRequests)
         commandCenter.releaseSetAside()
         await commandCenter.runRules()
+        // One short joke call first; the nudges wait for it so the model isn't asked twice at once.
+        dadJoke.startIfNeeded()
+        let jokes = dadJoke
+        difficulty.startNudges(for: mergeRequests.trackedMergeRequests, after: { await jokes.waitForJoke() })
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
@@ -89,6 +99,8 @@ final class AppModel {
     /// minute so interval changes and finishing onboarding take effect quickly.
     func startPolling() {
         guard pollTask == nil else { return }
+        // The joke needs only the model, so it needn't wait for GitLab.
+        dadJoke.startIfNeeded()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 if let self, !self.needsOnboarding {
@@ -110,6 +122,8 @@ final class AppModel {
         await mergeRequests.refreshDetails(for: mr)
         await jira.refresh(mr)
         await staticChecks.evaluate(mr)
+        if difficulty.needsFacts(mr) { await difficulty.evaluate(mr) }
+        difficulty.startNudges(for: [mr])
     }
 
     func refreshTokenState() {

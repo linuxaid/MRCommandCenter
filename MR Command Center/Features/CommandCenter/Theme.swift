@@ -208,6 +208,32 @@ extension View {
     }
 }
 
+/// An MR's review difficulty (#36): the number on green (1) through amber to red (10),
+/// with the reasons on hover. Takes the same space when there's no score yet, so rows line up.
+struct DifficultyBadge: View {
+    let difficulty: Difficulty?
+
+    static let size = CGSize(width: 24, height: 20)
+
+    var body: some View {
+        if let difficulty {
+            Text("\(difficulty.score)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .frame(width: Self.size.width, height: Self.size.height)
+                .background(Color(hue: difficulty.hue, saturation: 0.85, brightness: 0.68), in: .rect(cornerRadius: 5))
+                .help(difficulty.explanation)
+                .accessibilityLabel(difficulty.explanation)
+        } else {
+            Color.clear
+                .frame(width: Self.size.width, height: Self.size.height)
+                .help("Working out how hard this is to review")
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 /// Initials in a circle, colored consistently per person.
 struct Avatar: View {
     let name: String

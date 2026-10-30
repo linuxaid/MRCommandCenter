@@ -56,6 +56,18 @@ nonisolated struct GeneratedVerdict {
     var rationale: String
 }
 
+@Generable
+nonisolated enum GeneratedDifficultyFeel {
+    case simplerThanItLooks, aboutRight, harderThanItLooks
+}
+
+@Generable(description: "How hard the merge request is to review, compared with its size")
+nonisolated struct GeneratedDifficulty {
+    var feel: GeneratedDifficultyFeel
+    @Guide(description: "One short sentence on why")
+    var reason: String
+}
+
 extension GeneratedSeverity {
     nonisolated var value: Severity {
         switch self {
@@ -111,5 +123,16 @@ extension GeneratedFileFinding {
 extension GeneratedVerdict {
     nonisolated var result: VerdictResult {
         VerdictResult(status: status.value, criteriaCoverage: criteriaCoverage, topConcerns: topConcerns, rationale: rationale)
+    }
+}
+
+extension GeneratedDifficulty {
+    nonisolated var result: DifficultyNudge {
+        let value: DifficultyFeel = switch feel {
+        case .simplerThanItLooks: .simpler
+        case .aboutRight: .aboutRight
+        case .harderThanItLooks: .harder
+        }
+        return DifficultyNudge(feel: value, reason: reason)
     }
 }
