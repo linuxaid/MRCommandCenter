@@ -29,6 +29,12 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
         /// What `difficulty` answers; nil throws `difficultyFailure`.
         var difficultyNudge: DifficultyNudge? = DifficultyNudge(feel: .aboutRight, reason: "Fake reason.")
         var difficultyFailure: ReviewFailure = .refusal
+        var jokeCalls: [Call] = []
+        /// What `dadJoke` answers; nil throws `jokeFailure`.
+        var joke: String? = "Why did the fake model cross the road? To get to the other test."
+        var jokeFailure: ReviewFailure = .refusal
+        var jokeDelay: Duration = .zero
+
     }
 
     let identifier = "fake-model"
@@ -45,6 +51,7 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
     var verdictCalls: [Call] { state.withLock { $0.verdictCalls } }
     var maxInFlight: Int { state.withLock { $0.maxInFlight } }
     var difficultyCalls: [Call] { state.withLock { $0.difficultyCalls } }
+    var jokeCalls: [Call] { state.withLock { $0.jokeCalls } }
 
     func reviewFile(instructions: String, prompt: String, options: ReviewOptions, tools: ReviewTools?) async throws -> (FileReviewResult, ModelCallRecord) {
         let call = Call(instructions: instructions, prompt: prompt)
@@ -85,5 +92,15 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
         }
         guard let nudge else { throw ReviewModelError(failure: failure, transcript: "") }
         return nudge
+    }
+
+    func dadJoke(instructions: String, prompt: String, options: ReviewOptions) async throws -> String {
+        let (joke, failure, delay) = state.withLock { state in
+            state.jokeCalls.append(Call(instructions: instructions, prompt: prompt))
+            return (state.joke, state.jokeFailure, state.jokeDelay)
+        }
+        if delay > .zero { try await Task.sleep(for: delay) }
+        guard let joke else { throw ReviewModelError(failure: failure, transcript: "") }
+        return joke
     }
 }

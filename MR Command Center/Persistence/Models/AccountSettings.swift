@@ -57,6 +57,12 @@ final class AccountSettings {
     var mergeReadyReviewsAutomatically: Bool = false
     /// How MRs are ordered inside each lane (`LaneOrder`); easiest first unless changed (#36).
     var laneOrderRaw: String = LaneOrder.easiestFirst.rawValue
+    /// Today's dad joke (#38), the day it's for (`yyyy-MM-dd`), and recent ones not to repeat.
+    var dadJokeText: String?
+    var dadJokeDay: String?
+    /// The stored joke is a built-in one, because the model refused.
+    var dadJokeIsFallback: Bool = false
+    var recentDadJokes: [String] = []
     var notifyNewReviewRequests: Bool = false
     var notifyPipelineFailures: Bool = false
 

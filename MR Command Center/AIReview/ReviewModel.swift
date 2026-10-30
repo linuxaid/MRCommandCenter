@@ -25,6 +25,8 @@ nonisolated protocol ReviewLanguageModel: Sendable {
     func verdict(instructions: String, prompt: String, options: ReviewOptions) async throws -> (VerdictResult, ModelCallRecord)
     /// Whether an MR is simpler or harder to review than its size suggests (#36).
     func difficulty(instructions: String, prompt: String, options: ReviewOptions) async throws -> DifficultyNudge
+    /// Today's dad joke, as plain text (#38).
+    func dadJoke(instructions: String, prompt: String, options: ReviewOptions) async throws -> String
 }
 
 /// Apple's on-device model through Foundation Models. One fresh session per call.
@@ -78,6 +80,15 @@ nonisolated struct OnDeviceReviewModel: ReviewLanguageModel {
         do {
             let response = try await session.respond(to: prompt, generating: GeneratedDifficulty.self, options: options.generationOptions)
             return response.content.result
+        } catch {
+            throw ReviewModelError(failure: ReviewFailureMapper.map(error), transcript: Self.render(session.transcript))
+        }
+    }
+
+    func dadJoke(instructions: String, prompt: String, options: ReviewOptions) async throws -> String {
+        let session = LanguageModelSession(model: .default, instructions: instructions)
+        do {
+            return try await session.respond(to: prompt, options: options.generationOptions).content
         } catch {
             throw ReviewModelError(failure: ReviewFailureMapper.map(error), transcript: Self.render(session.transcript))
         }

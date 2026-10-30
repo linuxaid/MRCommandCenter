@@ -69,11 +69,13 @@ final class DifficultyService {
     /// background so a refresh never waits on it. Does nothing while the model is unavailable;
     /// the rules' score stands alone until it is. While a batch is running new requests are
     /// dropped; anything they'd have covered is picked up after the next refresh.
-    func startNudges(for mrs: [TrackedMR]) {
+    /// `after` runs first, to wait for other model work.
+    func startNudges(for mrs: [TrackedMR], after: (() async -> Void)? = nil) {
         guard nudgeTask == nil, dependencies.modelStatus().isAvailable else { return }
         let pending = mrs.filter(needsNudge)
         guard !pending.isEmpty else { return }
         nudgeTask = Task { [weak self] in
+            await after?()
             for mr in pending {
                 guard let self, !Task.isCancelled, await self.nudge(mr) else { break }
             }
@@ -116,18 +118,24 @@ final class DifficultyService {
         return true
     }
 
-    static func isTemporary(_ failure: ReviewFailure) -> Bool {
-        switch failure {
-        case .rateLimited, .timeout, .modelUnavailable, .other: true
-        case .contextSizeExceeded, .guardrailViolation, .unsupportedLanguage, .refusal, .decodingFailure: false
-        }
-    }
+    static func isTemporary(_ failure: ReviewFailure) -> Bool { failure.isTemporary }
 
     private func save() {
         do {
             try context.save()
         } catch {
             Log.persistence.error("Saving difficulty failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+extension ReviewFailure {
+    /// Busy, timed out or not ready: worth asking again later, unlike a refusal or an answer
+    /// that won't fit.
+    nonisolated var isTemporary: Bool {
+        switch self {
+        case .rateLimited, .timeout, .modelUnavailable, .other: true
+        case .contextSizeExceeded, .guardrailViolation, .unsupportedLanguage, .refusal, .decodingFailure: false
         }
     }
 }

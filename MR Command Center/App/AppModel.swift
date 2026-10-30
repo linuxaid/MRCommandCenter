@@ -12,6 +12,7 @@ final class AppModel {
     let discussions: DiscussionService
     let staticChecks: StaticCheckService
     let difficulty: DifficultyService
+    let dadJoke: DadJokeService
     let aiReview: AIReviewService
     let summaryPoster: SummaryPoster
     let evaluation: EvalService
@@ -46,6 +47,7 @@ final class AppModel {
         discussions.refreshMergeRequest = { mr in await store.refreshDetails(for: mr) }
         staticChecks = StaticCheckService(container: modelContainer, diffs: diffs)
         difficulty = DifficultyService(container: modelContainer, dependencies: dependencies, diffs: diffs)
+        dadJoke = DadJokeService(container: modelContainer, dependencies: dependencies)
         jira = JiraService(container: modelContainer, dependencies: dependencies)
         aiReview = AIReviewService(container: modelContainer, dependencies: dependencies, diffs: diffs, staticChecks: staticChecks, jira: jira)
         summaryPoster = SummaryPoster(container: modelContainer, aiReview: aiReview, discussions: discussions)
@@ -75,7 +77,10 @@ final class AppModel {
         await difficulty.evaluateMissing(mergeRequests.trackedMergeRequests)
         commandCenter.releaseSetAside()
         await commandCenter.runRules()
-        difficulty.startNudges(for: mergeRequests.trackedMergeRequests)
+        // One short joke call first; the nudges wait for it so the model isn't asked twice at once.
+        dadJoke.startIfNeeded()
+        let jokes = dadJoke
+        difficulty.startNudges(for: mergeRequests.trackedMergeRequests, after: { await jokes.waitForJoke() })
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
@@ -94,6 +99,8 @@ final class AppModel {
     /// minute so interval changes and finishing onboarding take effect quickly.
     func startPolling() {
         guard pollTask == nil else { return }
+        // The joke needs only the model, so it needn't wait for GitLab.
+        dadJoke.startIfNeeded()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 if let self, !self.needsOnboarding {
