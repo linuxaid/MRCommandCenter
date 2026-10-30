@@ -118,18 +118,24 @@ final class DifficultyService {
         return true
     }
 
-    static func isTemporary(_ failure: ReviewFailure) -> Bool {
-        switch failure {
-        case .rateLimited, .timeout, .modelUnavailable, .other: true
-        case .contextSizeExceeded, .guardrailViolation, .unsupportedLanguage, .refusal, .decodingFailure: false
-        }
-    }
+    static func isTemporary(_ failure: ReviewFailure) -> Bool { failure.isTemporary }
 
     private func save() {
         do {
             try context.save()
         } catch {
             Log.persistence.error("Saving difficulty failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+extension ReviewFailure {
+    /// Busy, timed out or not ready: worth asking again later, unlike a refusal or an answer
+    /// that won't fit.
+    nonisolated var isTemporary: Bool {
+        switch self {
+        case .rateLimited, .timeout, .modelUnavailable, .other: true
+        case .contextSizeExceeded, .guardrailViolation, .unsupportedLanguage, .refusal, .decodingFailure: false
         }
     }
 }

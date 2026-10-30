@@ -90,7 +90,7 @@ final class DadJokeService {
             let failure = ReviewFailureMapper.map(error)
             Log.sync.error("The model couldn't write a dad joke: \(failure.title, privacy: .public)")
             // A refusal or guardrail won't change with retries: settle on a built-in joke for today.
-            guard !DifficultyService.isTemporary(failure) else { return }
+            guard !failure.isTemporary else { return }
             store(Self.fallback(for: date, calendar: calendar, avoiding: recent), day: day, isFallback: true)
         }
     }
