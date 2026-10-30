@@ -352,14 +352,19 @@ final class CommandCenter {
         var title: String { self == .run ? "Run Pipeline" : "Retry Pipeline" }
     }
 
-    /// What the pipeline button offers: retry a failed or canceled pipeline of the latest commit,
-    /// start one when there's none (or the last one finished or is for an older commit), and
-    /// nothing while one is going.
+    /// What the pipeline button offers (#40: only when the latest commit's pipeline hasn't run
+    /// or failed): retry a failed or canceled pipeline of the latest commit, start one when
+    /// there's none, when it was skipped, or when the last one is for an older commit, and
+    /// nothing while one is going or once it passed. A pipeline waiting on a manual job has
+    /// run and not failed, so it gets no button either; the job is started in GitLab.
     nonisolated static func pipelineAction(status: PipelineStatus?, isForHead: Bool) -> PipelineAction? {
         guard let status else { return .run }
         if status.isActive { return nil }
+        guard isForHead else { return .run }
         switch status {
-        case .failed, .canceled: return isForHead ? .retry : .run
+        case .failed, .canceled: return .retry
+        case .success, .manual: return nil
+        case .skipped, .unknown: return .run
         default: return .run
         }
     }

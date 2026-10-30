@@ -24,8 +24,13 @@ struct PipelineActionTests {
         #expect(CommandCenter.pipelineAction(status: .canceled, isForHead: true) == .retry)
         #expect(CommandCenter.pipelineAction(status: .failed, isForHead: false) == .run,
                 "Retrying an older commit's pipeline wouldn't test the latest code")
-        #expect(CommandCenter.pipelineAction(status: .success, isForHead: true) == .run)
-        #expect(CommandCenter.pipelineAction(status: .manual, isForHead: true) == .run)
+        // #40: no button once the latest commit's pipeline passed.
+        #expect(CommandCenter.pipelineAction(status: .success, isForHead: true) == nil)
+        #expect(CommandCenter.pipelineAction(status: .manual, isForHead: true) == nil, "Ran, waiting on a manual job")
+        #expect(CommandCenter.pipelineAction(status: .success, isForHead: false) == .run,
+                "An older commit passed; the latest hasn't run")
+        #expect(CommandCenter.pipelineAction(status: .skipped, isForHead: true) == .run, "Skipped means it didn't run")
+        #expect(CommandCenter.pipelineAction(status: .unknown, isForHead: true) == .run)
         for status in PipelineStatus.allCases where status.isActive {
             #expect(CommandCenter.pipelineAction(status: status, isForHead: true) == nil, "Nothing while \(status) is going")
         }
@@ -61,14 +66,14 @@ struct PipelineActionTests {
     func fallsBackToABranchPipelineWhenTheProjectHasNoMRPipelines(status: Int) async throws {
         let (app, spy) = await loaded()
         spy.edit { $0.mergeRequestPipelineFailure = .server(status: status) }
-        let passed = try mr(app, 412)
+        let none = try mr(app, 1884)
 
-        await app.commandCenter.startPipeline(passed)
+        await app.commandCenter.startPipeline(none)
 
         #expect(spy.count("createPipeline") == 1)
-        #expect(spy.state.withLock { $0.pipelineRefs } == [passed.sourceBranch])
-        #expect(passed.pipelineStatus == .running)
-        #expect(app.commandCenter.pipelineErrors[passed.key] == nil)
+        #expect(spy.state.withLock { $0.pipelineRefs } == [none.sourceBranch])
+        #expect(none.pipelineStatus == .running)
+        #expect(app.commandCenter.pipelineErrors[none.key] == nil)
     }
 
     @Test func failureIsExplainedAndNothingChanges() async throws {
@@ -108,12 +113,26 @@ struct PipelineActionTests {
     @Test func otherErrorsDontFallBack() async throws {
         let (app, spy) = await loaded()
         spy.edit { $0.mergeRequestPipelineFailure = .forbidden }
-        let passed = try mr(app, 412)
+        let none = try mr(app, 1884)
 
-        await app.commandCenter.startPipeline(passed)
+        await app.commandCenter.startPipeline(none)
 
         #expect(spy.count("createPipeline") == 0)
-        #expect(app.commandCenter.pipelineErrors[passed.key] != nil)
+        #expect(app.commandCenter.pipelineErrors[none.key] != nil)
+    }
+
+    @Test func aPassedPipelineHasNoButton() async throws {
+        let (app, spy) = await loaded()
+        let passed = try mr(app, 412)
+        #expect(passed.pipelineStatus == .success)
+        #expect(app.commandCenter.pipelineAction(for: passed) == nil)
+
+        await app.commandCenter.startPipeline(passed)
+        #expect(spy.count("createMergeRequestPipeline") == 0 && spy.count("retryPipeline") == 0)
+
+        // A push makes the passed pipeline an older commit's: the new commit hasn't run.
+        passed.pipelineSHA = "0123456789abcdef"
+        #expect(app.commandCenter.pipelineAction(for: passed) == .run)
     }
 
     @Test func startingIsRecordedInActivity() async throws {
