@@ -11,6 +11,9 @@ final class DifficultyService {
     private let dependencies: AppDependencies
     private let diffs: DiffService
     private var nudgeTask: Task<Void, Never>?
+    /// MRs whose diff facts are being worked out, so a refresh and "Refresh This MR" never
+    /// fetch the same diff twice.
+    private var inFlight: Set<String> = []
 
     init(container: ModelContainer, dependencies: AppDependencies, diffs: DiffService) {
         self.container = container
@@ -31,6 +34,9 @@ final class DifficultyService {
     }
 
     func evaluate(_ mr: TrackedMR) async {
+        guard !inFlight.contains(mr.key) else { return }
+        inFlight.insert(mr.key)
+        defer { inFlight.remove(mr.key) }
         let headSHA = mr.headSHA
         let patterns = AccountSettings.current(in: context).extraTestPathPatterns
         do {
@@ -61,7 +67,8 @@ final class DifficultyService {
 
     /// Asks the model about each scored MR it hasn't seen at this commit, one at a time in the
     /// background so a refresh never waits on it. Does nothing while the model is unavailable;
-    /// the rules' score stands alone until it is.
+    /// the rules' score stands alone until it is. While a batch is running new requests are
+    /// dropped; anything they'd have covered is picked up after the next refresh.
     func startNudges(for mrs: [TrackedMR]) {
         guard nudgeTask == nil, dependencies.modelStatus().isAvailable else { return }
         let pending = mrs.filter(needsNudge)
@@ -93,13 +100,24 @@ final class DifficultyService {
         } catch is CancellationError {
             return
         } catch {
-            guard mr.headSHA == headSHA else { return }
-            // Not asked again at this commit; the rules' score stands alone.
+            let failure = ReviewFailureMapper.map(error)
+            Log.sync.error("The model couldn't judge difficulty: \(failure.title, privacy: .public)")
+            // Busy, timed out or not ready: try again after the next refresh. Background apps
+            // get rate-limited, and nudges run after automatic refreshes.
+            guard mr.headSHA == headSHA, !Self.isTemporary(failure) else { return }
+            // Something about this MR the model won't or can't answer: not asked again at
+            // this commit, and the rules' score stands alone.
             mr.difficultyNudgeData = nil
-            Log.sync.error("The model couldn't judge difficulty: \(ReviewFailureMapper.map(error).title, privacy: .public)")
         }
         mr.difficultyNudgeSHA = headSHA
         save()
+    }
+
+    static func isTemporary(_ failure: ReviewFailure) -> Bool {
+        switch failure {
+        case .rateLimited, .timeout, .modelUnavailable, .other: true
+        case .contextSizeExceeded, .guardrailViolation, .unsupportedLanguage, .refusal, .decodingFailure: false
+        }
     }
 
     private func save() {

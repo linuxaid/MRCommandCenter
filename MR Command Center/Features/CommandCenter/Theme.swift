@@ -208,7 +208,6 @@ extension View {
     }
 }
 
-/// Initials in a circle, colored consistently per person.
 /// An MR's review difficulty (#36): the number on green (1) through amber to red (10),
 /// with the reasons on hover. Takes the same space when there's no score yet, so rows line up.
 struct DifficultyBadge: View {
@@ -235,6 +234,7 @@ struct DifficultyBadge: View {
     }
 }
 
+/// Initials in a circle, colored consistently per person.
 struct Avatar: View {
     let name: String
     var size: CGFloat = 24

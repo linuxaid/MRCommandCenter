@@ -107,7 +107,7 @@ nonisolated struct DiffFacts: Codable, Sendable, Equatable {
         let kinds = counted.map { TestFileClassifier.classify($0.path, extraTestPatterns: extraTestPatterns) }
         changesSource = kinds.contains(.source)
         changesTests = kinds.contains(.test)
-        isSkimOnly = !diff.isOverflow && counted.allSatisfy(Self.isSkimWork)
+        isSkimOnly = !diff.isOverflow && !counted.isEmpty && counted.allSatisfy(Self.isSkimWork)
         skippedFiles = skipped
     }
 
@@ -130,7 +130,9 @@ nonisolated struct DiffFacts: Codable, Sendable, Equatable {
     static func isCommentOrBlank(_ line: String) -> Bool {
         let text = line.trimmingCharacters(in: .whitespaces)
         if text.isEmpty { return true }
-        if ["//", "/*", "*", "<!--", "--", "\"\"\""].contains(where: text.hasPrefix) { return true }
+        if ["//", "/*", "*/", "<!--", "\"\"\""].contains(where: text.hasPrefix) { return true }
+        // Block comment bodies (` * text`) and SQL/Lua comments (`-- text`), but not `*ptr = x` or `--i`.
+        if text == "*" || text.hasPrefix("* ") || text == "--" || text.hasPrefix("-- ") { return true }
         // `#` comments, but not `#if`, `#include` or `#[derive]`.
         return text == "#" || text.hasPrefix("# ") || text.hasPrefix("##")
     }
@@ -204,9 +206,11 @@ nonisolated struct Difficulty: Equatable, Sendable {
         if facts.fileCount > 1 {
             points += min(Weights.maxFilePoints, Weights.maxFilePoints * log(Double(facts.fileCount)) / log(Double(Weights.filesForMax)))
         }
-        let lineWord = lines == 1 ? "line" : "lines"
-        let fileWord = facts.fileCount == 1 ? "file" : "files"
-        reasons.append("\(lines.formatted()) \(lineWord) in \(facts.fileCount.formatted()) \(fileWord)")
+        if facts.fileCount > 0 {
+            let lineWord = lines == 1 ? "line" : "lines"
+            let fileWord = facts.fileCount == 1 ? "file" : "files"
+            reasons.append("\(lines.formatted()) \(lineWord) in \(facts.fileCount.formatted()) \(fileWord)")
+        }
 
         if facts.topLevelFolders > 1 {
             points += min(Weights.maxFolderPoints, Double(facts.topLevelFolders - 1) * Weights.pointsPerExtraFolder)
@@ -231,7 +235,9 @@ nonisolated struct Difficulty: Equatable, Sendable {
                           Double(open) * Weights.pointsPerOpenThread + Double(resolved) * Weights.pointsPerResolvedThread)
             if open > 0 { reasons.append(open == 1 ? "1 open thread" : "\(open) open threads") }
         }
-        if facts.skippedFiles > 0 {
+        // A dependency bump: only lock or generated files changed.
+        let onlySkipped = facts.fileCount == 0 && facts.skippedFiles > 0
+        if facts.skippedFiles > 0 && !onlySkipped {
             reasons.append(facts.skippedFiles == 1 ? "1 generated or lock file not counted"
                                                    : "\(facts.skippedFiles) generated or lock files not counted")
         }
@@ -241,9 +247,14 @@ nonisolated struct Difficulty: Equatable, Sendable {
         if facts.isSkimOnly {
             ruleScore = min(ruleScore, Weights.skimCap)
             reasons.append("only docs, comments, renames, or deletions")
+        } else if onlySkipped {
+            ruleScore = min(ruleScore, Weights.skimCap)
+            reasons.append(facts.skippedFiles == 1 ? "only 1 generated or lock file"
+                                                   : "only \(facts.skippedFiles) generated or lock files")
         }
+        let isCapped = facts.isSkimOnly || onlySkipped
         var score = Self.clamp(ruleScore + (nudge?.feel.delta ?? 0))
-        if facts.isSkimOnly { score = min(score, Weights.skimCap) }
+        if isCapped { score = min(score, Weights.skimCap) }
         if let nudge {
             reasons.append("Apple model: \(nudge.feel.phrase)" + (nudge.reason.isEmpty ? "" : ". \(nudge.reason)"))
         }
@@ -306,8 +317,11 @@ enum LaneOrder: String, CaseIterable, Identifiable {
 /// The prompt that asks the on-device model whether an MR is harder or simpler than its size suggests.
 nonisolated enum DifficultyPrompt {
     static let maxFiles = 25
-    static let sampleLinesPerFile = 4
-    static let maxLineLength = 120
+    static let sampleLinesPerFile = 3
+    static let maxLineLength = 100
+    /// Keeps the prompt well inside the on-device model's context (about 4k tokens, and code
+    /// tokenizes poorly), so big MRs, the likeliest to need a nudge, still get one.
+    static let maxCharacters = 4_000
 
     static let instructions = QuoteSafety.encodeInstructions("""
     You judge how hard a merge request is to review, compared with what its size suggests. \
@@ -319,19 +333,27 @@ nonisolated enum DifficultyPrompt {
     """)
 
     static func prompt(title: String, diff: MRDiff, ruleScore: Int) -> String {
-        var lines = ["Title: \(title)", "Size-based difficulty: \(ruleScore) of 10", "Files:"]
-        for file in diff.files.prefix(maxFiles) where !file.isGenerated && !DiffFacts.isLockFile(file.path) {
-            lines.append("- \(file.path) (\(file.change), +\(file.additions) -\(file.deletions))")
+        var lines = ["Title: \(title.prefix(200))", "Size-based difficulty: \(ruleScore) of 10", "Files:"]
+        var length = lines.reduce(0) { $0 + $1.count + 1 }
+        let files = diff.files.filter { !$0.isGenerated && !DiffFacts.isLockFile($0.path) }
+        var listed = 0
+        for file in files.prefix(maxFiles) {
+            var block = ["- \(file.path) (\(file.change), +\(file.additions) -\(file.deletions))"]
             let samples = file.hunks.lazy.flatMap(\.lines)
                 .filter { ($0.kind == .addition || $0.kind == .deletion) && !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
                 .prefix(sampleLinesPerFile)
             for line in samples {
                 let marker = line.kind == .addition ? "+" : "-"
-                lines.append("    \(marker) \(line.text.trimmingCharacters(in: .whitespaces).prefix(maxLineLength))")
+                block.append("    \(marker) \(line.text.trimmingCharacters(in: .whitespaces).prefix(maxLineLength))")
             }
+            let blockLength = block.reduce(0) { $0 + $1.count + 1 }
+            guard length + blockLength <= maxCharacters else { break }
+            lines += block
+            length += blockLength
+            listed += 1
         }
-        if diff.files.count > maxFiles {
-            lines.append("…and \(diff.files.count - maxFiles) more files")
+        if files.count > listed {
+            lines.append("…and \(files.count - listed) more files")
         }
         return QuoteSafety.encode(lines.joined(separator: "\n"))
     }

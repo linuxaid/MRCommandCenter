@@ -26,8 +26,9 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
         /// Throw a parse failure for these paths on the first (greedy) attempt.
         var parseFailureOnGreedy: Set<String> = []
         var difficultyCalls: [Call] = []
-        /// What `difficulty` answers; nil throws a model failure.
+        /// What `difficulty` answers; nil throws `difficultyFailure`.
         var difficultyNudge: DifficultyNudge? = DifficultyNudge(feel: .aboutRight, reason: "Fake reason.")
+        var difficultyFailure: ReviewFailure = .refusal
     }
 
     let identifier = "fake-model"
@@ -78,11 +79,11 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
     }
 
     func difficulty(instructions: String, prompt: String, options: ReviewOptions) async throws -> DifficultyNudge {
-        let nudge = state.withLock { state in
+        let (nudge, failure) = state.withLock { state in
             state.difficultyCalls.append(Call(instructions: instructions, prompt: prompt))
-            return state.difficultyNudge
+            return (state.difficultyNudge, state.difficultyFailure)
         }
-        guard let nudge else { throw ReviewModelError(failure: .modelUnavailable, transcript: "") }
+        guard let nudge else { throw ReviewModelError(failure: failure, transcript: "") }
         return nudge
     }
 }

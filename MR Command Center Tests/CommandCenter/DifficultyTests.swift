@@ -169,6 +169,35 @@ struct DifficultyRulesTests {
         #expect(Difficulty.hue(for: 10) == 0)
     }
 
+    @Test func aLockFileOnlyBumpIsCappedWithItsOwnReason() {
+        let difficulty = score([file("Package.resolved", added: 300, removed: 280)])
+        #expect(difficulty.score == 1)
+        #expect(difficulty.reasons == ["only 1 generated or lock file"])
+        #expect(!facts([file("yarn.lock", added: 9)]).isSkimOnly)
+        let big = Difficulty(facts: DiffFacts(linesChanged: 0, fileCount: 0, skippedFiles: 3), openThreads: 6, threads: 6,
+                             nudge: DifficultyNudge(feel: .harder, reason: ""))
+        #expect(big.score <= 2)
+    }
+
+    @Test func pointerAndDecrementLinesAreCode() {
+        #expect(!DiffFacts.isCommentOrBlank("*ptr = value;"))
+        #expect(!DiffFacts.isCommentOrBlank("--i;"))
+        #expect(DiffFacts.isCommentOrBlank(" * Explains the cart."))
+        #expect(DiffFacts.isCommentOrBlank("-- a SQL comment"))
+        #expect(DiffFacts.isCommentOrBlank("*/"))
+    }
+
+    @Test func thePromptStaysWithinItsBudget() {
+        let files = (0..<40).map { file("Sources/Feature\($0)/SomeRatherLongFileName\($0).swift",
+                                        lines: (0..<6).map { "+let value\($0) = computeSomething(from: input, with: options, and: more)" }) }
+        let diff = MRDiff(headSHA: "abc", diffs: files + [file("yarn.lock", added: 5)], changesCount: nil, fetchedAt: .now)
+        let prompt = DifficultyPrompt.prompt(title: "Big one", diff: diff, ruleScore: 8)
+        #expect(prompt.count <= DifficultyPrompt.maxCharacters + 40)
+        let listed = prompt.split(separator: "\n").count { $0.hasPrefix("- ") }
+        #expect(listed > 0 && listed < 40)
+        #expect(prompt.hasSuffix("…and \(40 - listed) more files"), "Lock files aren't counted as missing")
+    }
+
     @Test func overflowingDiffsUseGitLabsFileCount() {
         let facts = facts([file("App/A.swift", added: 10), file("App/B.swift", added: 10)], changesCount: "1000+")
         #expect(facts.fileCount == 1_000)
@@ -249,6 +278,28 @@ struct DifficultyServiceTests {
         let failed = try self.mr(failing, 412)
         #expect(failed.difficulty?.nudge == nil)
         #expect(failed.difficultyNudgeSHA == failed.headSHA) // not asked again at this commit
+    }
+
+    @Test func temporaryModelFailuresAreRetriedOnTheNextRefresh() async throws {
+        let model = FakeReviewModel()
+        model.edit {
+            $0.difficultyNudge = nil
+            $0.difficultyFailure = .rateLimited
+        }
+        let app = AppModel.testing(model: model)
+        await app.refresh(.automatic)
+        await app.difficulty.waitForNudges()
+        let mr = try mr(app, 412)
+        let firstCalls = model.difficultyCalls.count
+        #expect(firstCalls > 0)
+        #expect(mr.difficultyNudgeSHA == nil)
+
+        model.edit { $0.difficultyNudge = DifficultyNudge(feel: .simpler, reason: "") }
+        await app.refresh(.automatic)
+        await app.difficulty.waitForNudges()
+        #expect(model.difficultyCalls.count == firstCalls * 2)
+        #expect(mr.difficulty?.nudge?.feel == .simpler)
+        #expect(!DifficultyService.isTemporary(.refusal))
     }
 
     @Test func aNewCommitIsScoredAgain() async throws {

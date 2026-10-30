@@ -22,8 +22,11 @@ struct TriageView: View {
                     } else if case .lane(let lane) = destination {
                         LaneTitle(lane: lane, count: lanes[lane]?.count ?? 0)
                     }
-                    LaneOrderMenu()
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    if shown.contains(where: { !(lanes[$0] ?? []).isEmpty }) {
+                        LaneOrderMenu()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.top, -16)
+                    }
                     ForEach(shown) { lane in
                         let items = lanes[lane] ?? []
                         if destination != .briefing || !items.isEmpty {

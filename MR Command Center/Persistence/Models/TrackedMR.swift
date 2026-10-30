@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Synchronization
 
 /// An open merge request you review or authored, with cached status fields.
 /// Rows are kept (hidden) after the MR leaves the lists so AI runs and eval cases survive.
@@ -193,13 +194,13 @@ extension TrackedMR {
     /// The diff facts for the current head commit, if they've been worked out.
     var difficultyFacts: DiffFacts? {
         guard difficultySHA == headSHA, let difficultyFactsData else { return nil }
-        return try? JSONDecoder().decode(DiffFacts.self, from: difficultyFactsData)
+        return DifficultyDecodeCache.facts.decode(difficultyFactsData)
     }
 
     /// The model's nudge for the current head commit, if it gave one.
     var difficultyNudge: DifficultyNudge? {
         guard difficultyNudgeSHA == headSHA, let difficultyNudgeData else { return nil }
-        return try? JSONDecoder().decode(DifficultyNudge.self, from: difficultyNudgeData)
+        return DifficultyDecodeCache.nudges.decode(difficultyNudgeData)
     }
 
     /// Nil until the diff at the current head has been looked at.
@@ -307,5 +308,28 @@ nonisolated struct ThreadTurns: Equatable {
         }
         // A reply without a date can't be compared, so it doesn't count as one.
         latestReplyAt = latestReply == .distantPast ? nil : latestReply
+    }
+}
+
+/// Decoded difficulty JSON, keyed by the bytes themselves, so sorting lanes and drawing rows
+/// (which read every MR's score on each pass) don't decode again.
+nonisolated enum DifficultyDecodeCache {
+    static let facts = DecodeCache<DiffFacts>()
+    static let nudges = DecodeCache<DifficultyNudge>()
+}
+
+/// Bounded: cleared when full.
+nonisolated final class DecodeCache<Value: Decodable & Sendable>: Sendable {
+    let limit = 512
+    private let values = Mutex<[Data: Value]>([:])
+
+    func decode(_ data: Data) -> Value? {
+        if let value = values.withLock({ $0[data] }) { return value }
+        guard let value = try? JSONDecoder().decode(Value.self, from: data) else { return nil }
+        values.withLock { values in
+            if values.count >= limit { values.removeAll() }
+            values[data] = value
+        }
+        return value
     }
 }
