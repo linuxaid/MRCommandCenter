@@ -252,6 +252,7 @@ nonisolated struct Difficulty: Equatable, Sendable {
             reasons.append(facts.skippedFiles == 1 ? "only 1 generated or lock file"
                                                    : "only \(facts.skippedFiles) generated or lock files")
         }
+        if reasons.isEmpty { reasons.append("no changes yet") }
         let isCapped = facts.isSkimOnly || onlySkipped
         var score = Self.clamp(ruleScore + (nudge?.feel.delta ?? 0))
         if isCapped { score = min(score, Weights.skimCap) }

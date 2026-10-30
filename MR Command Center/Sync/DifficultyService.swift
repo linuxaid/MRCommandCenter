@@ -75,8 +75,7 @@ final class DifficultyService {
         guard !pending.isEmpty else { return }
         nudgeTask = Task { [weak self] in
             for mr in pending {
-                guard let self, !Task.isCancelled else { break }
-                await self.nudge(mr)
+                guard let self, !Task.isCancelled, await self.nudge(mr) else { break }
             }
             self?.nudgeTask = nil
         }
@@ -87,30 +86,34 @@ final class DifficultyService {
         await nudgeTask?.value
     }
 
-    func nudge(_ mr: TrackedMR) async {
+    /// False when the model is busy or not ready, so the rest of the batch waits for the next refresh.
+    @discardableResult
+    func nudge(_ mr: TrackedMR) async -> Bool {
         let headSHA = mr.headSHA
-        guard needsNudge(mr), let difficulty = mr.difficulty else { return }
+        guard needsNudge(mr), let difficulty = mr.difficulty else { return true }
         do {
             let diff = try await diffs.diff(for: mr)
             let prompt = DifficultyPrompt.prompt(title: mr.title, diff: diff, ruleScore: difficulty.ruleScore)
             let nudge = try await dependencies.reviewModel()
                 .difficulty(instructions: DifficultyPrompt.instructions, prompt: prompt, options: ReviewOptions(maximumResponseTokens: 120))
-            guard mr.headSHA == headSHA else { return }
+            guard mr.headSHA == headSHA else { return true }
             mr.difficultyNudgeData = try JSONEncoder().encode(nudge)
         } catch is CancellationError {
-            return
+            return false
         } catch {
             let failure = ReviewFailureMapper.map(error)
             Log.sync.error("The model couldn't judge difficulty: \(failure.title, privacy: .public)")
             // Busy, timed out or not ready: try again after the next refresh. Background apps
             // get rate-limited, and nudges run after automatic refreshes.
-            guard mr.headSHA == headSHA, !Self.isTemporary(failure) else { return }
+            if failure == .rateLimited || failure == .modelUnavailable { return false }
+            guard mr.headSHA == headSHA, !Self.isTemporary(failure) else { return true }
             // Something about this MR the model won't or can't answer: not asked again at
             // this commit, and the rules' score stands alone.
             mr.difficultyNudgeData = nil
         }
         mr.difficultyNudgeSHA = headSHA
         save()
+        return true
     }
 
     static func isTemporary(_ failure: ReviewFailure) -> Bool {

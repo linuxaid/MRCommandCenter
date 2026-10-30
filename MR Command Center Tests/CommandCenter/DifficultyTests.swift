@@ -177,6 +177,8 @@ struct DifficultyRulesTests {
         let big = Difficulty(facts: DiffFacts(linesChanged: 0, fileCount: 0, skippedFiles: 3), openThreads: 6, threads: 6,
                              nudge: DifficultyNudge(feel: .harder, reason: ""))
         #expect(big.score <= 2)
+        let empty = Difficulty(facts: DiffFacts(linesChanged: 0, fileCount: 0), openThreads: 0, threads: 0)
+        #expect(empty.explanation == "Difficulty 1 of 10 (Easy): no changes yet")
     }
 
     @Test func pointerAndDecrementLinesAreCode() {
@@ -291,13 +293,13 @@ struct DifficultyServiceTests {
         await app.difficulty.waitForNudges()
         let mr = try mr(app, 412)
         let firstCalls = model.difficultyCalls.count
-        #expect(firstCalls > 0)
+        #expect(firstCalls == 1, "A busy model stops the batch")
         #expect(mr.difficultyNudgeSHA == nil)
 
         model.edit { $0.difficultyNudge = DifficultyNudge(feel: .simpler, reason: "") }
         await app.refresh(.automatic)
         await app.difficulty.waitForNudges()
-        #expect(model.difficultyCalls.count == firstCalls * 2)
+        #expect(model.difficultyCalls.count == 1 + app.mergeRequests.trackedMergeRequests.count)
         #expect(mr.difficulty?.nudge?.feel == .simpler)
         #expect(!DifficultyService.isTemporary(.refusal))
     }
