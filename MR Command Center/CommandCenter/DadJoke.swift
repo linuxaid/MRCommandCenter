@@ -3,9 +3,17 @@ import Observation
 import SwiftData
 import os
 
+/// Today's joke and where it came from.
+struct DadJoke: Equatable {
+    let text: String
+    /// False for a built-in joke standing in for the model's.
+    let isFromModel: Bool
+}
+
 /// One dad joke a day at the top of the main window (#38), written by the on-device model.
-/// Kept in settings so it stays the same all day, across launches. When the model can't run
-/// or gives nothing usable, a joke from a short built-in list stands in.
+/// Kept in settings so it stays the same all day, across launches. Until the model's joke
+/// arrives, or when the model refuses, a joke from a short built-in list stands in. A model
+/// that's busy or not ready is asked again after the next refresh.
 @Observable
 final class DadJokeService {
     @ObservationIgnored private let container: ModelContainer
@@ -15,7 +23,7 @@ final class DadJokeService {
     /// Bumped when a new joke is stored, so the banner updates.
     private(set) var revision = 0
 
-    /// Jokes remembered so the model is asked not to repeat them.
+    /// Jokes remembered so neither the model nor the built-in list repeats them.
     static let recentLimit = 14
     static let maxLength = 280
 
@@ -26,11 +34,20 @@ final class DadJokeService {
 
     private var settings: AccountSettings { AccountSettings.current(in: context) }
 
-    /// Today's joke, or nil until it's been written.
-    func joke(now: Date = .now, calendar: Calendar = .current) -> String? {
+    /// Today's joke: the one stored for today, or a built-in one until it's been written.
+    func joke(now: Date = .now, calendar: Calendar = .current) -> DadJoke {
         _ = revision
-        guard settings.dadJokeDay == Self.dayKey(now, calendar: calendar) else { return nil }
-        return settings.dadJokeText
+        let settings = settings
+        if let text = settings.dadJokeText, settings.dadJokeDay == Self.dayKey(now, calendar: calendar) {
+            return DadJoke(text: text, isFromModel: !settings.dadJokeIsFallback)
+        }
+        return DadJoke(text: Self.fallback(for: now, calendar: calendar, avoiding: settings.recentDadJokes), isFromModel: false)
+    }
+
+    /// Whether a joke has been settled for today (the model's, or a built-in one after it refused).
+    func hasStoredJoke(now: Date = .now, calendar: Calendar = .current) -> Bool {
+        let settings = settings
+        return settings.dadJokeText != nil && settings.dadJokeDay == Self.dayKey(now, calendar: calendar)
     }
 
     static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
@@ -38,42 +55,51 @@ final class DadJokeService {
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
-    /// Writes today's joke in the background if there isn't one yet. Cheap to call on every refresh.
+    /// Asks the model for today's joke in the background if it hasn't written one yet. Cheap
+    /// to call on every refresh; does nothing while the model can't run.
     func startIfNeeded(now: Date = .now, calendar: Calendar = .current) {
-        guard task == nil, joke(now: now, calendar: calendar) == nil else { return }
+        guard task == nil, !hasStoredJoke(now: now, calendar: calendar), dependencies.modelStatus().isAvailable else { return }
         task = Task { [weak self] in
             await self?.makeJoke(for: now, calendar: calendar)
             self?.task = nil
         }
     }
 
-    /// Waits for a joke being written (tests).
+    /// Waits for a joke being written. The difficulty nudges wait on it, so the two never ask
+    /// the model at once.
     func waitForJoke() async {
         await task?.value
     }
 
     private func makeJoke(for date: Date, calendar: Calendar) async {
         let recent = settings.recentDadJokes
-        var text: String?
-        if dependencies.modelStatus().isAvailable {
-            do {
-                let answer = try await dependencies.reviewModel()
-                    .dadJoke(instructions: Self.instructions, prompt: Self.prompt(avoiding: recent),
-                             options: ReviewOptions(greedy: false, temperature: 1.0, maximumResponseTokens: 120))
-                text = Self.clean(answer, avoiding: recent)
-            } catch is CancellationError {
-                return
-            } catch {
-                Log.sync.error("The model couldn't write a dad joke: \(ReviewFailureMapper.map(error).title, privacy: .public)")
+        let day = Self.dayKey(date, calendar: calendar)
+        do {
+            let answer = try await dependencies.reviewModel()
+                .dadJoke(instructions: Self.instructions, prompt: Self.prompt(avoiding: recent),
+                         options: ReviewOptions(greedy: false, temperature: 1.0, maximumResponseTokens: 120))
+            if let text = Self.clean(answer, avoiding: recent) {
+                store(text, day: day, isFallback: false)
+            } else {
+                // Empty, too long, or a repeat: asked again after the next refresh.
+                Log.sync.info("The model's dad joke wasn't usable; trying again later")
             }
+        } catch is CancellationError {
+            return
+        } catch {
+            let failure = ReviewFailureMapper.map(error)
+            Log.sync.error("The model couldn't write a dad joke: \(failure.title, privacy: .public)")
+            // A refusal or guardrail won't change with retries: settle on a built-in joke for today.
+            guard !DifficultyService.isTemporary(failure) else { return }
+            store(Self.fallback(for: date, calendar: calendar, avoiding: recent), day: day, isFallback: true)
         }
-        store(text ?? Self.fallback(for: date, calendar: calendar), day: Self.dayKey(date, calendar: calendar))
     }
 
-    private func store(_ joke: String, day: String) {
+    private func store(_ joke: String, day: String, isFallback: Bool) {
         let settings = settings
         settings.dadJokeText = joke
         settings.dadJokeDay = day
+        settings.dadJokeIsFallback = isFallback
         settings.recentDadJokes = Array((settings.recentDadJokes.filter { $0 != joke } + [joke]).suffix(Self.recentLimit))
         do {
             try context.save()
@@ -96,13 +122,17 @@ final class DadJokeService {
     /// The model's answer, tidied, or nil when it's empty, too long, or a repeat.
     static func clean(_ answer: String, avoiding recent: [String]) -> String? {
         var text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
-        for prefix in ["Here's a dad joke:", "Here is a dad joke:", "Here's one:", "Dad joke:"]
-        where text.lowercased().hasPrefix(prefix.lowercased()) {
-            text = String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["Here's a dad joke:", "Here is a dad joke:", "Here's one:", "Dad joke:"] {
+            for variant in [prefix, prefix.replacingOccurrences(of: "'", with: "’")]
+            where text.lowercased().hasPrefix(variant.lowercased()) {
+                text = String(text.dropFirst(variant.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
-        let quotes = CharacterSet(charactersIn: "\"“”'")
-        if let first = text.unicodeScalars.first, let last = text.unicodeScalars.last,
-           quotes.contains(first), quotes.contains(last), text.count > 1 {
+        // Outer quotes around the whole joke, but not dialogue like "Hi," said Dad, "bye."
+        let quotes = CharacterSet(charactersIn: "\"“”")
+        if text.count > 1, text.unicodeScalars.filter(quotes.contains).count == 2,
+           let first = text.unicodeScalars.first, let last = text.unicodeScalars.last,
+           quotes.contains(first), quotes.contains(last) {
             text = String(text.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         text = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -113,11 +143,13 @@ final class DadJokeService {
         return text
     }
 
-    /// The same joke all day, a different one the next.
-    static func fallback(for date: Date, calendar: Calendar = .current) -> String {
+    /// The same joke all day, a different one the next, skipping recent jokes while it can.
+    static func fallback(for date: Date, calendar: Calendar = .current, avoiding recent: [String] = []) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         let day = (parts.year ?? 0) * 372 + (parts.month ?? 0) * 31 + (parts.day ?? 0)
-        return fallbackJokes[day % fallbackJokes.count]
+        let start = day % fallbackJokes.count
+        let order = fallbackJokes[start...] + fallbackJokes[..<start]
+        return order.first { !recent.contains($0) } ?? fallbackJokes[start]
     }
 
     static let fallbackJokes = [

@@ -30,8 +30,10 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
         var difficultyNudge: DifficultyNudge? = DifficultyNudge(feel: .aboutRight, reason: "Fake reason.")
         var difficultyFailure: ReviewFailure = .refusal
         var jokeCalls: [Call] = []
-        /// What `dadJoke` answers; nil throws a refusal.
+        /// What `dadJoke` answers; nil throws `jokeFailure`.
         var joke: String? = "Why did the fake model cross the road? To get to the other test."
+        var jokeFailure: ReviewFailure = .refusal
+        var jokeDelay: Duration = .zero
 
     }
 
@@ -93,11 +95,12 @@ nonisolated final class FakeReviewModel: ReviewLanguageModel {
     }
 
     func dadJoke(instructions: String, prompt: String, options: ReviewOptions) async throws -> String {
-        let joke = state.withLock { state in
+        let (joke, failure, delay) = state.withLock { state in
             state.jokeCalls.append(Call(instructions: instructions, prompt: prompt))
-            return state.joke
+            return (state.joke, state.jokeFailure, state.jokeDelay)
         }
-        guard let joke else { throw ReviewModelError(failure: .refusal, transcript: "") }
+        if delay > .zero { try await Task.sleep(for: delay) }
+        guard let joke else { throw ReviewModelError(failure: failure, transcript: "") }
         return joke
     }
 }

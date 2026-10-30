@@ -17,10 +17,8 @@ struct TriageView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    if let joke = appModel.dadJoke.joke() {
-                        DadJokeLine(joke: joke)
-                            .padding(.bottom, -12)
-                    }
+                    DadJokeLine(joke: appModel.dadJoke.joke())
+                        .padding(.bottom, -12)
                     if destination == .briefing {
                         BriefingHeader(lanes: lanes)
                     } else if case .lane(let lane) = destination {
@@ -99,11 +97,11 @@ struct TriageView: View {
 
 /// Today's dad joke (#38), above everything else.
 private struct DadJokeLine: View {
-    let joke: String
+    let joke: DadJoke
 
     var body: some View {
         Label {
-            Text(joke)
+            Text(joke.text)
                 .italic()
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {
@@ -112,8 +110,9 @@ private struct DadJokeLine: View {
         .font(.system(size: 13))
         .foregroundStyle(Theme.inkSecondary)
         .textSelection(.enabled)
-        .help("Today's dad joke, written by Apple's on-device model. A new one tomorrow.")
-        .accessibilityLabel("Today's dad joke: \(joke)")
+        .help(joke.isFromModel ? "Today's dad joke, written by Apple's on-device model. A new one tomorrow."
+                               : "Today's dad joke, from the app's own collection while Apple's on-device model can't write one.")
+        .accessibilityLabel("Today's dad joke: \(joke.text)")
     }
 }
 

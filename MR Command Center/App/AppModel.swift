@@ -77,8 +77,10 @@ final class AppModel {
         await difficulty.evaluateMissing(mergeRequests.trackedMergeRequests)
         commandCenter.releaseSetAside()
         await commandCenter.runRules()
-        difficulty.startNudges(for: mergeRequests.trackedMergeRequests)
+        // One short joke call first; the nudges wait for it so the model isn't asked twice at once.
         dadJoke.startIfNeeded()
+        let jokes = dadJoke
+        difficulty.startNudges(for: mergeRequests.trackedMergeRequests, after: { await jokes.waitForJoke() })
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
@@ -97,6 +99,8 @@ final class AppModel {
     /// minute so interval changes and finishing onboarding take effect quickly.
     func startPolling() {
         guard pollTask == nil else { return }
+        // The joke needs only the model, so it needn't wait for GitLab.
+        dadJoke.startIfNeeded()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 if let self, !self.needsOnboarding {

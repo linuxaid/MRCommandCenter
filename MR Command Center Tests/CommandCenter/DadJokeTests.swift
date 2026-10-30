@@ -16,19 +16,33 @@ struct DadJokeTests {
         calendar.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour))!
     }
 
+    private let modelJoke = "Why did the fake model cross the road? To get to the other test."
+
     @Test func aRefreshWritesTodaysJokeOnce() async throws {
         let model = FakeReviewModel()
         let app = AppModel.testing(model: model)
-        #expect(app.dadJoke.joke() == nil)
+        let before = app.dadJoke.joke()
+        #expect(!before.isFromModel, "A built-in joke shows until the model's arrives")
+        #expect(DadJokeService.fallbackJokes.contains(before.text))
 
         await app.refresh(.automatic)
         await app.dadJoke.waitForJoke()
-        #expect(app.dadJoke.joke() == "Why did the fake model cross the road? To get to the other test.")
+        #expect(app.dadJoke.joke() == DadJoke(text: modelJoke, isFromModel: true))
         #expect(model.jokeCalls.count == 1)
 
         await app.refresh(.automatic)
         await app.dadJoke.waitForJoke()
         #expect(model.jokeCalls.count == 1, "Same day, same joke")
+    }
+
+    @Test func aRefreshDoesntWaitForTheJoke() async throws {
+        let model = FakeReviewModel()
+        // The model takes far longer than a refresh; the refresh returns with a built-in joke showing.
+        model.edit { $0.jokeDelay = .seconds(60) }
+        let app = AppModel.testing(model: model)
+        await app.refresh(.automatic)
+        #expect(!app.dadJoke.joke().isFromModel)
+        #expect(!app.dadJoke.hasStoredJoke())
     }
 
     @Test func aNewDayBringsANewJokeThatAvoidsRecentOnes() async throws {
@@ -38,31 +52,84 @@ struct DadJokeTests {
 
         service.startIfNeeded(now: date(30), calendar: calendar)
         await service.waitForJoke()
-        let first = try #require(service.joke(now: date(30, hour: 23), calendar: calendar))
-        #expect(service.joke(now: date(31), calendar: calendar) == nil, "Yesterday's joke isn't today's")
+        let first = service.joke(now: date(30, hour: 23), calendar: calendar)
+        #expect(first.isFromModel)
+        #expect(!service.joke(now: date(31), calendar: calendar).isFromModel, "Yesterday's joke isn't today's")
 
         model.edit { $0.joke = "  \"I'm afraid for the calendar. Its days are numbered.\"\n" }
         service.startIfNeeded(now: date(31), calendar: calendar)
         await service.waitForJoke()
-        #expect(service.joke(now: date(31), calendar: calendar) == "I'm afraid for the calendar. Its days are numbered.")
-        #expect(model.jokeCalls.last?.prompt.contains(first) == true)
+        #expect(service.joke(now: date(31), calendar: calendar).text == "I'm afraid for the calendar. Its days are numbered.")
+        #expect(model.jokeCalls.last?.prompt.contains(first.text) == true)
         #expect(AccountSettings.current(in: app.modelContainer.mainContext).recentDadJokes.count == 2)
     }
 
-    @Test func withoutTheModelABuiltInJokeStandsIn() async throws {
-        let app = AppModel.testing(modelStatus: .appleIntelligenceNotEnabled)
+    @Test func aRepeatIsAskedAgainLater() async throws {
+        let model = FakeReviewModel()
+        let app = AppModel.testing(model: model)
         app.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
         await app.dadJoke.waitForJoke()
-        let joke = try #require(app.dadJoke.joke(now: date(30), calendar: calendar))
-        #expect(DadJokeService.fallbackJokes.contains(joke))
-        #expect(joke == DadJokeService.fallback(for: date(30), calendar: calendar))
 
+        // Tomorrow the model repeats itself: not stored, and a built-in joke shows meanwhile.
+        app.dadJoke.startIfNeeded(now: date(31), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        #expect(!app.dadJoke.hasStoredJoke(now: date(31), calendar: calendar))
+        #expect(app.dadJoke.joke(now: date(31), calendar: calendar).text != modelJoke)
+
+        model.edit { $0.joke = "A brand new one." }
+        app.dadJoke.startIfNeeded(now: date(31), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        #expect(app.dadJoke.joke(now: date(31), calendar: calendar) == DadJoke(text: "A brand new one.", isFromModel: true))
+    }
+
+    @Test func aBusyModelIsAskedAgainAfterTheNextRefresh() async throws {
+        let model = FakeReviewModel()
+        model.edit {
+            $0.joke = nil
+            $0.jokeFailure = .rateLimited
+        }
+        let app = AppModel.testing(model: model)
+        app.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        #expect(!app.dadJoke.hasStoredJoke(now: date(30), calendar: calendar))
+        #expect(!app.dadJoke.joke(now: date(30), calendar: calendar).isFromModel)
+
+        model.edit { $0.joke = "Finally." }
+        app.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        #expect(model.jokeCalls.count == 2)
+        #expect(app.dadJoke.joke(now: date(30), calendar: calendar) == DadJoke(text: "Finally.", isFromModel: true))
+    }
+
+    @Test func aRefusalSettlesOnABuiltInJokeForTheDay() async throws {
         let model = FakeReviewModel()
         model.edit { $0.joke = nil }
-        let failing = AppModel.testing(model: model)
-        failing.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
-        await failing.dadJoke.waitForJoke()
-        #expect(failing.dadJoke.joke(now: date(30), calendar: calendar).map(DadJokeService.fallbackJokes.contains) == true)
+        let app = AppModel.testing(model: model)
+        app.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        let joke = app.dadJoke.joke(now: date(30), calendar: calendar)
+        #expect(!joke.isFromModel)
+        #expect(DadJokeService.fallbackJokes.contains(joke.text))
+        app.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        #expect(model.jokeCalls.count == 1)
+    }
+
+    @Test func withoutTheModelABuiltInJokeShows() async throws {
+        let model = FakeReviewModel()
+        let app = AppModel.testing(model: model, modelStatus: .appleIntelligenceNotEnabled)
+        app.dadJoke.startIfNeeded(now: date(30), calendar: calendar)
+        await app.dadJoke.waitForJoke()
+        #expect(model.jokeCalls.isEmpty)
+        let joke = app.dadJoke.joke(now: date(30), calendar: calendar)
+        #expect(joke == DadJoke(text: DadJokeService.fallback(for: date(30), calendar: calendar), isFromModel: false))
+    }
+
+    @Test func builtInJokesSkipRecentOnes() {
+        let today = DadJokeService.fallback(for: date(30), calendar: calendar)
+        let other = DadJokeService.fallback(for: date(30), calendar: calendar, avoiding: [today])
+        #expect(other != today)
+        #expect(DadJokeService.fallback(for: date(30), calendar: calendar, avoiding: DadJokeService.fallbackJokes) == today)
     }
 
     @Test func fallbackJokesChangeDaily() {
@@ -74,6 +141,9 @@ struct DadJokeTests {
         #expect(DadJokeService.clean("Here's a dad joke: Why? Because.", avoiding: []) == "Why? Because.")
         #expect(DadJokeService.clean("Why did it?\n\nBecause it could.", avoiding: []) == "Why did it? Because it could.")
         #expect(DadJokeService.clean("“Quoted joke.”", avoiding: []) == "Quoted joke.")
+        #expect(DadJokeService.clean("Here’s a dad joke: Curly apostrophe.", avoiding: []) == "Curly apostrophe.")
+        #expect(DadJokeService.clean("\"Hi,\" said Dad, \"bye.\"", avoiding: []) == "\"Hi,\" said Dad, \"bye.\"")
+        #expect(DadJokeService.clean("'Cause I said so, kids'", avoiding: []) == "'Cause I said so, kids'")
         #expect(DadJokeService.clean("   ", avoiding: []) == nil)
         #expect(DadJokeService.clean(String(repeating: "a", count: 400), avoiding: []) == nil)
         #expect(DadJokeService.clean("Old joke.", avoiding: ["old JOKE."]) == nil)

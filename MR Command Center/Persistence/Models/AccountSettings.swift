@@ -60,6 +60,8 @@ final class AccountSettings {
     /// Today's dad joke (#38), the day it's for (`yyyy-MM-dd`), and recent ones not to repeat.
     var dadJokeText: String?
     var dadJokeDay: String?
+    /// The stored joke is a built-in one, because the model refused.
+    var dadJokeIsFallback: Bool = false
     var recentDadJokes: [String] = []
     var notifyNewReviewRequests: Bool = false
     var notifyPipelineFailures: Bool = false
