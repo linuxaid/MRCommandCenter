@@ -12,6 +12,7 @@ final class AppModel {
     let discussions: DiscussionService
     let staticChecks: StaticCheckService
     let difficulty: DifficultyService
+    let dadJoke: DadJokeService
     let aiReview: AIReviewService
     let summaryPoster: SummaryPoster
     let evaluation: EvalService
@@ -46,6 +47,7 @@ final class AppModel {
         discussions.refreshMergeRequest = { mr in await store.refreshDetails(for: mr) }
         staticChecks = StaticCheckService(container: modelContainer, diffs: diffs)
         difficulty = DifficultyService(container: modelContainer, dependencies: dependencies, diffs: diffs)
+        dadJoke = DadJokeService(container: modelContainer, dependencies: dependencies)
         jira = JiraService(container: modelContainer, dependencies: dependencies)
         aiReview = AIReviewService(container: modelContainer, dependencies: dependencies, diffs: diffs, staticChecks: staticChecks, jira: jira)
         summaryPoster = SummaryPoster(container: modelContainer, aiReview: aiReview, discussions: discussions)
@@ -76,6 +78,7 @@ final class AppModel {
         commandCenter.releaseSetAside()
         await commandCenter.runRules()
         difficulty.startNudges(for: mergeRequests.trackedMergeRequests)
+        dadJoke.startIfNeeded()
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {

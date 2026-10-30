@@ -17,6 +17,10 @@ struct TriageView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    if let joke = appModel.dadJoke.joke() {
+                        DadJokeLine(joke: joke)
+                            .padding(.bottom, -12)
+                    }
                     if destination == .briefing {
                         BriefingHeader(lanes: lanes)
                     } else if case .lane(let lane) = destination {
@@ -90,6 +94,26 @@ struct TriageView: View {
             return .handled
         }
         .onAppear { isFocused = true }
+    }
+}
+
+/// Today's dad joke (#38), above everything else.
+private struct DadJokeLine: View {
+    let joke: String
+
+    var body: some View {
+        Label {
+            Text(joke)
+                .italic()
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Text("😄").accessibilityHidden(true)
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(Theme.inkSecondary)
+        .textSelection(.enabled)
+        .help("Today's dad joke, written by Apple's on-device model. A new one tomorrow.")
+        .accessibilityLabel("Today's dad joke: \(joke)")
     }
 }
 
