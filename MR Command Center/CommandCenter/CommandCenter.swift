@@ -365,7 +365,7 @@ final class CommandCenter {
         case .failed, .canceled: return .retry
         case .success, .manual: return nil
         case .skipped, .unknown: return .run
-        default: return .run
+        case .created, .waitingForResource, .preparing, .pending, .running, .scheduled: return nil
         }
     }
 
