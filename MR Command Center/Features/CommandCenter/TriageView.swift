@@ -17,7 +17,7 @@ struct TriageView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    DadJokeLine(joke: appModel.dadJoke.joke())
+                    DadJokeCard(joke: appModel.dadJoke.joke())
                     if destination == .briefing {
                         BriefingHeader(lanes: lanes)
                     } else if case .lane(let lane) = destination {
@@ -96,7 +96,7 @@ struct TriageView: View {
 
 /// Today's dad joke (#38), above everything else, as its own card so it's easy to spot:
 /// the setup as a headline and the punchline under it.
-private struct DadJokeLine: View {
+private struct DadJokeCard: View {
     let joke: DadJoke
 
     var body: some View {
@@ -107,7 +107,7 @@ private struct DadJokeLine: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("DAD JOKE OF THE DAY")
                     .font(Theme.eyebrow)
-                    .foregroundStyle(Theme.yourMove)
+                    .foregroundStyle(Theme.inkTertiary)
                 Text(joke.setup)
                     .font(Theme.headline(19))
                     .foregroundStyle(Theme.ink)
@@ -124,9 +124,9 @@ private struct DadJokeLine: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
-        .card(isHighlighted: true, accent: Theme.yourMove)
+        .card()
         .textSelection(.enabled)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
         .help(joke.isFromModel ? "Today's dad joke, written by Apple's on-device model. A new one tomorrow."
                                : "Today's dad joke, from the app's own collection while Apple's on-device model can't write one.")
         .accessibilityLabel("Today's dad joke: \(joke.text)")

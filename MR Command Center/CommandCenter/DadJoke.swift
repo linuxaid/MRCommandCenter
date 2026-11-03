@@ -9,20 +9,39 @@ struct DadJoke: Equatable {
     /// False for a built-in joke standing in for the model's.
     let isFromModel: Bool
 
-    /// The joke as the banner shows it (#38): the first sentence as the setup, the rest as
-    /// the punchline. A one-sentence joke is all setup, with no punchline.
-    var parts: (setup: String, punchline: String?) {
-        let characters = Array(text)
-        for index in characters.indices.dropLast() where "?!.".contains(characters[index]) && characters[index + 1].isWhitespace {
+    /// The setup the card shows as a headline (#38): the first sentence.
+    let setup: String
+    /// The rest, shown under the setup. Nil for a one-sentence joke.
+    let punchline: String?
+
+    init(text: String, isFromModel: Bool) {
+        self.text = text
+        self.isFromModel = isFromModel
+        (setup, punchline) = Self.split(text)
+    }
+
+    /// Splits at the first sentence end (`.`, `?` or `!` before a space) that leaves text after
+    /// it. A dot after an abbreviation ("Dr.", "e.g.") doesn't end a sentence.
+    static func split(_ text: String) -> (setup: String, punchline: String?) {
+        let characters = Array(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        for index in characters.indices.dropLast()
+        where "?!.".contains(characters[index]) && characters[index + 1].isWhitespace && !isAbbreviation(characters, endingAt: index) {
             let setup = String(characters[...index]).trimmingCharacters(in: .whitespacesAndNewlines)
             let rest = String(characters[(index + 1)...]).trimmingCharacters(in: .whitespacesAndNewlines)
             if !rest.isEmpty { return (setup, rest) }
         }
-        return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil)
+        return (String(characters), nil)
     }
 
-    var setup: String { parts.setup }
-    var punchline: String? { parts.punchline }
+    /// A short capitalized word ("Mr.", "Dr.", "St.") or one with a dot inside ("e.g.").
+    private static func isAbbreviation(_ characters: [Character], endingAt dot: Int) -> Bool {
+        guard characters[dot] == "." else { return false }
+        var start = dot
+        while start > 0, !characters[start - 1].isWhitespace { start -= 1 }
+        let word = characters[start..<dot]
+        guard let first = word.first else { return false }
+        return word.contains(".") || (first.isUppercase && word.count <= 3)
+    }
 }
 
 /// One dad joke a day at the top of the main window (#38), written by the on-device model.

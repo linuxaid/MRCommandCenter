@@ -173,10 +173,43 @@ struct DadJokeTests {
         #expect(version.punchline == nil)
     }
 
+    @Test func abbreviationsDontEndTheSetup() {
+        let doctor = DadJoke(text: "Dr. Pun walked in. Nobody laughed.", isFromModel: true)
+        #expect(doctor.setup == "Dr. Pun walked in.")
+        #expect(doctor.punchline == "Nobody laughed.")
+
+        let example = DadJoke(text: "Some puns, e.g. this one, are groan-worthy. Sorry.", isFromModel: true)
+        #expect(example.setup == "Some puns, e.g. this one, are groan-worthy.")
+        #expect(example.punchline == "Sorry.")
+    }
+
+    @Test func oddModelAnswersStillSplitSensibly() {
+        let dialogue = DadJoke(text: "\"Why?\" he asked. \"Because.\"", isFromModel: true)
+        #expect(dialogue.setup == "\"Why?\" he asked.")
+        #expect(dialogue.punchline == "\"Because.\"")
+
+        let ellipsis = DadJoke(text: "Wait... for it.", isFromModel: true)
+        #expect(ellipsis.setup == "Wait... for it.")
+        #expect(ellipsis.punchline == nil)
+
+        let short = DadJoke(text: "Ha!", isFromModel: true)
+        #expect(short.setup == "Ha!")
+        #expect(short.punchline == nil)
+
+        let padded = DadJoke(text: "  Why? Because.  ", isFromModel: true)
+        #expect(padded.setup == "Why?")
+        #expect(padded.punchline == "Because.")
+    }
+
     @Test func splittingNeverLosesWords() {
-        for text in DadJokeService.fallbackJokes {
+        let texts = DadJokeService.fallbackJokes + [
+            "Dr. Pun walked in. Nobody laughed.", "\"Why?\" he asked. \"Because.\"", "Wait... for it.",
+            "Ha!", "  Why?\n\nBecause.  ", "Mr. and Mrs. Smith. Smiths.",
+        ]
+        for text in texts {
             let joke = DadJoke(text: text, isFromModel: false)
-            #expect([joke.setup, joke.punchline].compactMap { $0 }.joined(separator: " ") == text)
+            let shown = [joke.setup, joke.punchline].compactMap { $0 }.joined(separator: " ")
+            #expect(shown.split(whereSeparator: \.isWhitespace) == text.split(whereSeparator: \.isWhitespace), "\(text)")
         }
     }
 
