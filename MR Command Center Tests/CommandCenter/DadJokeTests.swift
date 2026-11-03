@@ -149,6 +149,88 @@ struct DadJokeTests {
         #expect(DadJokeService.clean("Old joke.", avoiding: ["old JOKE."]) == nil)
     }
 
+    /// The banner shows the setup as a headline and the punchline under it (#38 follow-up).
+    @Test func jokesSplitIntoSetupAndPunchline() {
+        let question = DadJoke(text: "Why do programmers prefer dark mode? Because light attracts bugs.", isFromModel: true)
+        #expect(question.setup == "Why do programmers prefer dark mode?")
+        #expect(question.punchline == "Because light attracts bugs.")
+
+        let statement = DadJoke(text: "I only know 25 letters of the alphabet. I don't know y.", isFromModel: false)
+        #expect(statement.setup == "I only know 25 letters of the alphabet.")
+        #expect(statement.punchline == "I don't know y.")
+
+        let longer = DadJoke(text: "Knock knock! Who's there? Interrupting cow.", isFromModel: true)
+        #expect(longer.setup == "Knock knock!")
+        #expect(longer.punchline == "Who's there? Interrupting cow.")
+
+        let oneLiner = DadJoke(text: "I used to hate facial hair, but then it grew on me.", isFromModel: false)
+        #expect(oneLiner.setup == oneLiner.text)
+        #expect(oneLiner.punchline == nil)
+
+        // Dots inside a word, like a version number, aren't sentence ends.
+        let version = DadJoke(text: "Version 2.0 shipped on time", isFromModel: true)
+        #expect(version.setup == "Version 2.0 shipped on time")
+        #expect(version.punchline == nil)
+    }
+
+    @Test func abbreviationsDontEndTheSetup() {
+        let doctor = DadJoke(text: "Dr. Pun walked in. Nobody laughed.", isFromModel: true)
+        #expect(doctor.setup == "Dr. Pun walked in.")
+        #expect(doctor.punchline == "Nobody laughed.")
+
+        let example = DadJoke(text: "Some puns, e.g. this one, are groan-worthy. Sorry.", isFromModel: true)
+        #expect(example.setup == "Some puns, e.g. this one, are groan-worthy.")
+        #expect(example.punchline == "Sorry.")
+
+        let professor = DadJoke(text: "Prof. Pun spoke. Nobody laughed.", isFromModel: true)
+        #expect(professor.setup == "Prof. Pun spoke.")
+        #expect(professor.punchline == "Nobody laughed.")
+    }
+
+    /// Short names and words at a sentence end still end the setup.
+    @Test func shortWordsStillEndASentence() {
+        for (text, setup) in [("I asked Bob. He said no.", "I asked Bob."), ("It's OK. Really.", "It's OK."),
+                              ("I love the API. It never rests.", "I love the API."), ("I said no. He laughed.", "I said no.")] {
+            #expect(DadJoke(text: text, isFromModel: true).setup == setup, "\(text)")
+        }
+    }
+
+    @Test func builtInJokesWithTwoSentencesHaveAPunchline() {
+        for text in DadJokeService.fallbackJokes where text.contains(". ") || text.contains("? ") {
+            #expect(DadJoke(text: text, isFromModel: false).punchline != nil, "\(text)")
+        }
+    }
+
+    @Test func oddModelAnswersStillSplitSensibly() {
+        let dialogue = DadJoke(text: "\"Why?\" he asked. \"Because.\"", isFromModel: true)
+        #expect(dialogue.setup == "\"Why?\" he asked.")
+        #expect(dialogue.punchline == "\"Because.\"")
+
+        let ellipsis = DadJoke(text: "Wait... for it.", isFromModel: true)
+        #expect(ellipsis.setup == "Wait... for it.")
+        #expect(ellipsis.punchline == nil)
+
+        let short = DadJoke(text: "Ha!", isFromModel: true)
+        #expect(short.setup == "Ha!")
+        #expect(short.punchline == nil)
+
+        let padded = DadJoke(text: "  Why? Because.  ", isFromModel: true)
+        #expect(padded.setup == "Why?")
+        #expect(padded.punchline == "Because.")
+    }
+
+    @Test func splittingNeverLosesWords() {
+        let texts = DadJokeService.fallbackJokes + [
+            "Dr. Pun walked in. Nobody laughed.", "\"Why?\" he asked. \"Because.\"", "Wait... for it.",
+            "Ha!", "  Why?\n\nBecause.  ", "Mr. and Mrs. Smith. Smiths.",
+        ]
+        for text in texts {
+            let joke = DadJoke(text: text, isFromModel: false)
+            let shown = [joke.setup, joke.punchline].compactMap { $0 }.joined(separator: " ")
+            #expect(shown.split(whereSeparator: \.isWhitespace) == text.split(whereSeparator: \.isWhitespace), "\(text)")
+        }
+    }
+
     @Test func dayKeysFollowTheLocalCalendar() {
         #expect(DadJokeService.dayKey(date(30, hour: 23), calendar: calendar) == "2026-10-30")
         #expect(DadJokeService.dayKey(date(31, hour: 0), calendar: calendar) == "2026-10-31")

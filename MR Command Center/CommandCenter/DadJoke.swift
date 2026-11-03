@@ -8,6 +8,42 @@ struct DadJoke: Equatable {
     let text: String
     /// False for a built-in joke standing in for the model's.
     let isFromModel: Bool
+
+    /// The setup the card shows as a headline (#38): the first sentence.
+    let setup: String
+    /// The rest, shown under the setup. Nil for a one-sentence joke.
+    let punchline: String?
+
+    init(text: String, isFromModel: Bool) {
+        self.text = text
+        self.isFromModel = isFromModel
+        (setup, punchline) = Self.split(text)
+    }
+
+    /// Splits at the first sentence end (`.`, `?` or `!` before a space) that leaves text after
+    /// it. A dot after an abbreviation ("Dr.", "e.g.") doesn't end a sentence.
+    static func split(_ text: String) -> (setup: String, punchline: String?) {
+        let characters = Array(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        for index in characters.indices.dropLast()
+        where "?!.".contains(characters[index]) && characters[index + 1].isWhitespace && !isAbbreviation(characters, endingAt: index) {
+            let setup = String(characters[...index]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest = String(characters[(index + 1)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !rest.isEmpty { return (setup, rest) }
+        }
+        return (String(characters), nil)
+    }
+
+    /// Words whose dot doesn't end a sentence, lowercased and without the dot.
+    static let abbreviations: Set<String> = ["mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "vs", "etc", "mt", "ft", "approx"]
+
+    /// A known abbreviation ("Mr.", "Prof.") or a word with a dot inside ("e.g.", "...").
+    private static func isAbbreviation(_ characters: [Character], endingAt dot: Int) -> Bool {
+        guard characters[dot] == "." else { return false }
+        var start = dot
+        while start > 0, !characters[start - 1].isWhitespace { start -= 1 }
+        let word = characters[start..<dot]
+        return word.contains(".") || abbreviations.contains(String(word).lowercased())
+    }
 }
 
 /// One dad joke a day at the top of the main window (#38), written by the on-device model.
