@@ -181,6 +181,24 @@ struct DadJokeTests {
         let example = DadJoke(text: "Some puns, e.g. this one, are groan-worthy. Sorry.", isFromModel: true)
         #expect(example.setup == "Some puns, e.g. this one, are groan-worthy.")
         #expect(example.punchline == "Sorry.")
+
+        let professor = DadJoke(text: "Prof. Pun spoke. Nobody laughed.", isFromModel: true)
+        #expect(professor.setup == "Prof. Pun spoke.")
+        #expect(professor.punchline == "Nobody laughed.")
+    }
+
+    /// Short names and words at a sentence end still end the setup.
+    @Test func shortWordsStillEndASentence() {
+        for (text, setup) in [("I asked Bob. He said no.", "I asked Bob."), ("It's OK. Really.", "It's OK."),
+                              ("I love the API. It never rests.", "I love the API."), ("I said no. He laughed.", "I said no.")] {
+            #expect(DadJoke(text: text, isFromModel: true).setup == setup, "\(text)")
+        }
+    }
+
+    @Test func builtInJokesWithTwoSentencesHaveAPunchline() {
+        for text in DadJokeService.fallbackJokes where text.contains(". ") || text.contains("? ") {
+            #expect(DadJoke(text: text, isFromModel: false).punchline != nil, "\(text)")
+        }
     }
 
     @Test func oddModelAnswersStillSplitSensibly() {

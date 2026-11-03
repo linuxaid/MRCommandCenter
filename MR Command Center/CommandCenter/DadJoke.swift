@@ -33,14 +33,16 @@ struct DadJoke: Equatable {
         return (String(characters), nil)
     }
 
-    /// A short capitalized word ("Mr.", "Dr.", "St.") or one with a dot inside ("e.g.").
+    /// Words whose dot doesn't end a sentence, lowercased and without the dot.
+    static let abbreviations: Set<String> = ["mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "vs", "etc", "mt", "ft", "approx"]
+
+    /// A known abbreviation ("Mr.", "Prof.") or a word with a dot inside ("e.g.", "...").
     private static func isAbbreviation(_ characters: [Character], endingAt dot: Int) -> Bool {
         guard characters[dot] == "." else { return false }
         var start = dot
         while start > 0, !characters[start - 1].isWhitespace { start -= 1 }
         let word = characters[start..<dot]
-        guard let first = word.first else { return false }
-        return word.contains(".") || (first.isUppercase && word.count <= 3)
+        return word.contains(".") || abbreviations.contains(String(word).lowercased())
     }
 }
 
