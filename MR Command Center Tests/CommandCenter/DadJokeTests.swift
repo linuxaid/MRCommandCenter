@@ -149,6 +149,37 @@ struct DadJokeTests {
         #expect(DadJokeService.clean("Old joke.", avoiding: ["old JOKE."]) == nil)
     }
 
+    /// The banner shows the setup as a headline and the punchline under it (#38 follow-up).
+    @Test func jokesSplitIntoSetupAndPunchline() {
+        let question = DadJoke(text: "Why do programmers prefer dark mode? Because light attracts bugs.", isFromModel: true)
+        #expect(question.setup == "Why do programmers prefer dark mode?")
+        #expect(question.punchline == "Because light attracts bugs.")
+
+        let statement = DadJoke(text: "I only know 25 letters of the alphabet. I don't know y.", isFromModel: false)
+        #expect(statement.setup == "I only know 25 letters of the alphabet.")
+        #expect(statement.punchline == "I don't know y.")
+
+        let longer = DadJoke(text: "Knock knock! Who's there? Interrupting cow.", isFromModel: true)
+        #expect(longer.setup == "Knock knock!")
+        #expect(longer.punchline == "Who's there? Interrupting cow.")
+
+        let oneLiner = DadJoke(text: "I used to hate facial hair, but then it grew on me.", isFromModel: false)
+        #expect(oneLiner.setup == oneLiner.text)
+        #expect(oneLiner.punchline == nil)
+
+        // Dots inside a word, like a version number, aren't sentence ends.
+        let version = DadJoke(text: "Version 2.0 shipped on time", isFromModel: true)
+        #expect(version.setup == "Version 2.0 shipped on time")
+        #expect(version.punchline == nil)
+    }
+
+    @Test func splittingNeverLosesWords() {
+        for text in DadJokeService.fallbackJokes {
+            let joke = DadJoke(text: text, isFromModel: false)
+            #expect([joke.setup, joke.punchline].compactMap { $0 }.joined(separator: " ") == text)
+        }
+    }
+
     @Test func dayKeysFollowTheLocalCalendar() {
         #expect(DadJokeService.dayKey(date(30, hour: 23), calendar: calendar) == "2026-10-30")
         #expect(DadJokeService.dayKey(date(31, hour: 0), calendar: calendar) == "2026-10-31")

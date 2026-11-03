@@ -8,6 +8,21 @@ struct DadJoke: Equatable {
     let text: String
     /// False for a built-in joke standing in for the model's.
     let isFromModel: Bool
+
+    /// The joke as the banner shows it (#38): the first sentence as the setup, the rest as
+    /// the punchline. A one-sentence joke is all setup, with no punchline.
+    var parts: (setup: String, punchline: String?) {
+        let characters = Array(text)
+        for index in characters.indices.dropLast() where "?!.".contains(characters[index]) && characters[index + 1].isWhitespace {
+            let setup = String(characters[...index]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest = String(characters[(index + 1)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !rest.isEmpty { return (setup, rest) }
+        }
+        return (text.trimmingCharacters(in: .whitespacesAndNewlines), nil)
+    }
+
+    var setup: String { parts.setup }
+    var punchline: String? { parts.punchline }
 }
 
 /// One dad joke a day at the top of the main window (#38), written by the on-device model.

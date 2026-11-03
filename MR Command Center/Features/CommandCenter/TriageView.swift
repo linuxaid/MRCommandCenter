@@ -18,7 +18,6 @@ struct TriageView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     DadJokeLine(joke: appModel.dadJoke.joke())
-                        .padding(.bottom, -12)
                     if destination == .briefing {
                         BriefingHeader(lanes: lanes)
                     } else if case .lane(let lane) = destination {
@@ -95,21 +94,39 @@ struct TriageView: View {
     }
 }
 
-/// Today's dad joke (#38), above everything else.
+/// Today's dad joke (#38), above everything else, as its own card so it's easy to spot:
+/// the setup as a headline and the punchline under it.
 private struct DadJokeLine: View {
     let joke: DadJoke
 
     var body: some View {
-        Label {
-            Text(joke.text)
-                .italic()
-                .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Text("😄").accessibilityHidden(true)
+        HStack(alignment: .top, spacing: 14) {
+            Text("😄")
+                .font(.system(size: 34))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("DAD JOKE OF THE DAY")
+                    .font(Theme.eyebrow)
+                    .foregroundStyle(Theme.yourMove)
+                Text(joke.setup)
+                    .font(Theme.headline(19))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let punchline = joke.punchline {
+                    Text(punchline)
+                        .font(.system(size: 15, weight: .medium))
+                        .italic()
+                        .foregroundStyle(Theme.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.system(size: 13))
-        .foregroundStyle(Theme.inkSecondary)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .card(isHighlighted: true, accent: Theme.yourMove)
         .textSelection(.enabled)
+        .accessibilityElement(children: .combine)
         .help(joke.isFromModel ? "Today's dad joke, written by Apple's on-device model. A new one tomorrow."
                                : "Today's dad joke, from the app's own collection while Apple's on-device model can't write one.")
         .accessibilityLabel("Today's dad joke: \(joke.text)")
